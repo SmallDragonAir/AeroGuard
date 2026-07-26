@@ -313,11 +313,17 @@ AeroGuard 当前遵循：
 
 ---
 
-## 📄 开源许可
+## 📄 开源许可证
 
-目前尚未最终确定开源许可证。
+AeroGuard 采用 GNU General Public License v3.0
+（GPL-3.0）发布。
 
-在确定许可证之前，请暂时不要将 AeroGuard 代码用于正式商业分发。
+你可以自由使用、研究、修改和重新分发 AeroGuard。
+
+如果你修改 AeroGuard 或将其代码组成受 GPL 约束的派生/组合程序并对外分发，
+则需要按照 GPL 的要求提供相应源代码并保留相同的自由软件权利。
+
+详见仓库中的 `LICENSE` 文件。
 
 ---
 
