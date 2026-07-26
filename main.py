@@ -5,6 +5,7 @@ from scanner import scan_community
 from analyzer import analyze_community
 from classifier import classify_issues
 
+# === 1. 扫描与分析 ===
 
 path_input = input("请输入 MSFS Community 文件夹路径：")
 
@@ -23,16 +24,39 @@ if not community_path.exists():
 elif not community_path.is_dir():
     print("输入的路径不是一个目录。")
 else:
+    # === Scanner 计时 ===
+
+    scanner_start = time.perf_counter()
+
     addons, scan_errors = scan_community(community_path)
+
+    scanner_time = time.perf_counter() - scanner_start
+
+
+    # === Analyzer 计时 ===
+
+    analyzer_start = time.perf_counter()
+
     issues = analyze_community(
         addons, full_scan=full_scan)
 
+    analyzer_time = time.perf_counter() - analyzer_start
+
+
+    # === Classifier 计时 ===
+
+    classifier_start = time.perf_counter()
+
     issues = classify_issues(issues)
+
+    classifier_time = time.perf_counter() - classifier_start
 
     print("插件总数：", len(addons))
     print("扫描异常:", len(scan_errors))
     print("检测问题:", len(issues))
     print("\n检测结果：")
+
+# === 2. 按规则统计 ===
 
 rule_package_counts = Counter()
 rule_affected_counts = Counter()
@@ -58,6 +82,8 @@ for rule_id, package_count in rule_package_counts.items():
         f"{affected_count} 个项目"
     )
 
+
+# === 3. 异常数量排行 ===
 
 print("\n=== 异常数量 TOP 10 ===")
 
@@ -106,6 +132,9 @@ for issue in issues:
     for file_path in issue.get("details", []):
         print("  缺失：", file_path)
 
+
+# === 4. 按插件聚合结果 ===
+
 package_risk = defaultdict(lambda: {
     "error": 0,
     "warning": 0,
@@ -143,7 +172,9 @@ for package, stats in sorted_risk[:10]:
         f"影响 {stats['affected']} 项"
     )
 
-
+# === 5. 临时风险排序 ===
+# 当前仅根据 severity 和受影响项目数量排序。
+# 等 classifier 稳定后，应逐步由 impact 驱动。
 
 impact_priority = {
     "potentially_runtime": 3,
@@ -177,5 +208,9 @@ for issue in missing_issues:
 
 elapsed_time = time.perf_counter() - start_time
 
-print("扫描耗时：", round(elapsed_time, 2), "秒")
+print("\n=== 性能统计 ===")
+print("Scanner：", round(scanner_time, 2), "秒")
+print("Analyzer：", round(analyzer_time, 2), "秒")
+print("Classifier：", round(classifier_time, 4), "秒")
+print("总耗时：", round(elapsed_time, 2), "秒")
 
