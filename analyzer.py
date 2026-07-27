@@ -1,6 +1,108 @@
+import os
 import time
 import json
 from pathlib import Path
+
+
+
+def build_file_index(package_root):
+    """
+    扫描 Package 的逻辑文件树，并建立内存索引。
+
+    支持普通目录和目录符号链接。
+
+    为避免符号链接形成循环，只阻止当前递归链中
+    再次进入已经访问过的真实目录。
+
+    注意：
+    不能使用一个全局 visited 集合，因为多个不同的
+    符号链接可能合法地指向同一个真实目录，而它们在
+    Package 中对应不同的逻辑路径。
+    """
+
+    package_root = Path(package_root)
+
+    file_index = {}
+
+
+    def scan_directory(current_path, ancestor_real_paths):
+        # resolve() 用于判断当前目录真实指向哪里，
+        # 只用于防止 symlink 循环。
+        try:
+            real_path = os.path.normcase(
+                os.path.realpath(current_path)
+            )
+        except OSError:
+            return
+
+        # 当前递归链中再次碰到同一个真实目录，
+        # 说明可能出现 symlink 循环。
+        if real_path in ancestor_real_paths:
+            return
+
+        current_ancestors = (
+            ancestor_real_paths | {real_path}
+        )
+
+        try:
+            with os.scandir(current_path) as entries:
+
+                for entry in entries:
+
+                    try:
+                        # follow_symlinks=True：
+                        # 目录软链接也作为目录继续扫描。
+                        if entry.is_dir(follow_symlinks=True):
+
+                            scan_directory(
+                                entry.path,
+                                current_ancestors
+                            )
+
+                            continue
+
+
+                        if not entry.is_file(
+                            follow_symlinks=True
+                        ):
+                            continue
+
+
+                        actual_path = Path(entry.path)
+
+                        # 这里保留 Package 内看到的“逻辑路径”，
+                        # 而不是 resolve() 后的真实目标路径。
+                        relative_path = (
+                            actual_path
+                            .relative_to(package_root)
+                            .as_posix()
+                        )
+
+                        normalized_path = (
+                            relative_path.casefold()
+                        )
+
+                        file_index[normalized_path] = {
+                            "path": relative_path,
+                            "size": entry.stat(
+                                follow_symlinks=True
+                            ).st_size
+                        }
+
+                    except OSError:
+                        # 某个文件突然不可访问时，
+                        # 不应导致整个 Community 扫描崩溃。
+                        continue
+
+        except OSError:
+            # 无权限、失效链接等目录级异常暂时跳过。
+            return
+
+
+    scan_directory(package_root, set())
+
+    return file_index
+
 
 
 def analyze_community(addons, full_scan=False):
@@ -183,48 +285,63 @@ def analyze_community(addons, full_scan=False):
         size_mismatches = []
         unlisted_files = []
 
+
+        package_root = Path(addon["path"])
+
+
+        # === 完整扫描：建立实际文件索引 ===
+
+        tree_start = time.perf_counter()
+
+        file_index = build_file_index(package_root)
+
+        tree_walk_time += time.perf_counter() - tree_start
+
+
+        # === 完整扫描：核对 layout 声明 ===
+
         declared_start = time.perf_counter()
 
         for file_info in valid_entries:
 
-            relative_path = file_info.get("path")
+            relative_path = file_info["path"]
 
-            if not relative_path:
-                continue
+            normalized_path = (
+                relative_path
+                .replace("\\", "/")
+                .casefold()
+            )
 
-            actual_path = Path(addon["path"]) / relative_path
+            actual_file = file_index.get(normalized_path)
 
-            if not actual_path.exists():
+            # 索引里不存在，说明 layout 声明了文件，
+            # 但实际 Package 中没有找到。
+            if actual_file is None:
                 missing_files.append(relative_path)
                 continue
 
             expected_size = file_info.get("size")
-            actual_size = actual_path.stat().st_size
+            actual_size = actual_file["size"]
 
-            if expected_size is not None and actual_size != expected_size:
+            if (
+                expected_size is not None
+                and actual_size != expected_size
+            ):
                 size_mismatches.append({
                     "path": relative_path,
                     "expected": expected_size,
                     "actual": actual_size
                 })
 
-        declared_check_time += time.perf_counter() - declared_start
+        declared_check_time += (
+            time.perf_counter() - declared_start
+        )
 
-        # === 完整扫描：遍历实际文件树，寻找未登记文件 ===
+        # === 完整扫描：寻找未登记文件 ===
+        # 这里不再访问磁盘，只遍历已经建立好的 file_index。
+        for normalized_path, actual_file in file_index.items():
 
-        package_root = Path(addon["path"])
-        tree_start = time.perf_counter()
-
-        for actual_file in package_root.rglob("*"):
-
-            if not actual_file.is_file():
-                continue
-
-            relative_path = actual_file.relative_to(package_root).as_posix()
-            normalized_path = relative_path.casefold()
-
-            # manifest / layout 是 Package 元数据文件，
-            # 不要求它们出现在 layout.json 的 content 中。
+            # Package 元数据文件不要求登记在 layout.json 的 content 中。
             if normalized_path in {
                 "manifest.json",
                 "layout.json"
@@ -232,9 +349,7 @@ def analyze_community(addons, full_scan=False):
                 continue
 
             if normalized_path not in listed_paths:
-                unlisted_files.append(relative_path)
-
-        tree_walk_time += time.perf_counter() - tree_start
+                unlisted_files.append(actual_file["path"])
 
         # === 生成完整扫描问题 ===
 
