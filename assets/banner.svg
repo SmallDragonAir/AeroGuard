@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a1120"/>
+      <stop offset="0.55" stop-color="#0d1b34"/>
+      <stop offset="1" stop-color="#0a1628"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- flight grid -->
+  <g stroke="#ffffff" stroke-opacity="0.05">
+    <line x1="0" y1="158" x2="1200" y2="158"/>
+    <line x1="0" y1="315" x2="1200" y2="315"/>
+    <line x1="0" y1="472" x2="1200" y2="472"/>
+    <line x1="200" y1="0" x2="200" y2="630"/>
+    <line x1="400" y1="0" x2="400" y2="630"/>
+    <line x1="600" y1="0" x2="600" y2="630"/>
+    <line x1="800" y1="0" x2="800" y2="630"/>
+    <line x1="1000" y1="0" x2="1000" y2="630"/>
+  </g>
+
+  <!-- radar arcs -->
+  <g fill="none" stroke="#22d3ee" stroke-opacity="0.16">
+    <circle cx="1005" cy="150" r="120"/>
+    <circle cx="1005" cy="150" r="190"/>
+    <circle cx="1005" cy="150" r="260"/>
+    <line x1="745" y1="150" x2="1265" y2="150"/>
+    <line x1="1005" y1="-110" x2="1005" y2="410"/>
+  </g>
+  <circle cx="1005" cy="150" r="10" fill="#22d3ee" fill-opacity="0.9"/>
+
+  <!-- package rows mock -->
+  <g transform="translate(700 300)">
+    <rect x="0" y="0" width="400" height="64" rx="10" fill="#ffffff" fill-opacity="0.05"/>
+    <text x="22" y="27" font-family="Segoe UI, system-ui, sans-serif" font-size="17" fill="#cbd5e1">manifest.json</text>
+    <text x="22" y="50" font-family="Segoe UI, system-ui, sans-serif" font-size="13" fill="#64748b">title · content_type · version</text>
+    <circle cx="372" cy="24" r="11" fill="#34d399"/>
+    <path d="M366 24 L370 29 L379 18" stroke="#06251c" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <rect x="0" y="76" width="400" height="64" rx="10" fill="#ffffff" fill-opacity="0.05"/>
+    <text x="22" y="103" font-family="Segoe UI, system-ui, sans-serif" font-size="17" fill="#cbd5e1">layout.json</text>
+    <text x="22" y="126" font-family="Segoe UI, system-ui, sans-serif" font-size="13" fill="#64748b">duplicates · invalid entries · sizes</text>
+    <circle cx="372" cy="100" r="11" fill="#34d399"/>
+    <path d="M366 100 L370 105 L379 94" stroke="#06251c" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <rect x="0" y="152" width="400" height="64" rx="10" fill="#ffffff" fill-opacity="0.05"/>
+    <text x="22" y="179" font-family="Segoe UI, system-ui, sans-serif" font-size="17" fill="#cbd5e1">Community / addons</text>
+    <text x="22" y="202" font-family="Segoe UI, system-ui, sans-serif" font-size="13" fill="#64748b">quick scan · full scan · JSON report</text>
+    <circle cx="372" cy="176" r="11" fill="#fbbf24"/>
+    <path d="M368 176 L372 181 L378 170" stroke="#231a05" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- headline -->
+  <text x="80" y="120" font-family="Segoe UI, system-ui, sans-serif" font-size="90" font-weight="700" fill="#f8fafc">AeroGuard</text>
+  <rect x="84" y="150" width="120" height="6" rx="3" fill="url(#accent)"/>
+
+  <text x="80" y="205" font-family="Segoe UI, system-ui, sans-serif" font-size="30" font-weight="300" fill="#e2e8f0">MSFS Add-on Diagnostics &amp; Management</text>
+  <text x="80" y="245" font-family="Microsoft YaHei UI, Segoe UI, system-ui, sans-serif" font-size="24" fill="#94a3b8">本地、可解释的 Community 插件诊断与管理工具</text>
+
+  <!-- feature chips -->
+  <g font-family="Segoe UI, Microsoft YaHei UI, system-ui, sans-serif">
+    <rect x="80" y="290" width="196" height="46" rx="23" fill="#22d3ee" fill-opacity="0.12" stroke="#22d3ee" stroke-opacity="0.5"/>
+    <text x="178" y="320" font-size="20" fill="#a5f3fc" text-anchor="middle">快速 / 完整扫描</text>
+
+    <rect x="292" y="290" width="210" height="46" rx="23" fill="#34d399" fill-opacity="0.12" stroke="#34d399" stroke-opacity="0.5"/>
+    <text x="397" y="320" font-size="20" fill="#a7f3d0" text-anchor="middle">冲突 / 依赖分析</text>
+
+    <rect x="518" y="290" width="180" height="46" rx="23" fill="#fbbf24" fill-opacity="0.12" stroke="#fbbf24" stroke-opacity="0.5"/>
+    <text x="608" y="320" font-size="20" fill="#fde68a" text-anchor="middle">安全安装回滚</text>
+  </g>
+
+  <g font-family="Segoe UI, Microsoft YaHei UI, system-ui, sans-serif">
+    <rect x="80" y="360" width="196" height="40" rx="20" fill="#ffffff" fill-opacity="0.06"/>
+    <text x="178" y="386" font-size="18" fill="#cbd5e1" text-anchor="middle">历史快照 · 环境基线</text>
+    <rect x="292" y="360" width="150" height="40" rx="20" fill="#ffffff" fill-opacity="0.06"/>
+    <text x="367" y="386" font-size="18" fill="#cbd5e1" text-anchor="middle">插件管理 CLI</text>
+    <rect x="458" y="360" width="170" height="40" rx="20" fill="#ffffff" fill-opacity="0.06"/>
+    <text x="543" y="386" font-size="18" fill="#cbd5e1" text-anchor="middle">中文 / English</text>
+    <rect x="644" y="360" width="150" height="40" rx="20" fill="#ffffff" fill-opacity="0.06"/>
+    <text x="719" y="386" font-size="18" fill="#cbd5e1" text-anchor="middle">只读 · 不上传</text>
+  </g>
+
+  <text x="80" y="480" font-family="Segoe UI, system-ui, sans-serif" font-size="20" fill="#7dd3fc">Single-file desktop app · Quick &amp; full scans · JSON reports</text>
+  <text x="80" y="514" font-family="Segoe UI, system-ui, sans-serif" font-size="20" fill="#7dd3fc">Transactional installs · Rollback-safe · GPL-3.0</text>
+
+  <!-- footer -->
+  <line x1="80" y1="556" x2="1120" y2="556" stroke="#ffffff" stroke-opacity="0.08"/>
+  <text x="80" y="590" font-family="Segoe UI, Microsoft YaHei UI, system-ui, sans-serif" font-size="17" fill="#64748b">AeroGuard · MSFS / MSFS 2024 Community 插件诊断 · 开放源代码 (GPL-3.0)</text>
+</svg>

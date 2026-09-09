@@ -1,5 +1,7 @@
 # AeroGuard
 
+![AeroGuard banner](assets/banner.svg)
+
 > Local, explainable add-on diagnostics & environment health checks for **Microsoft Flight Simulator**.
 
 AeroGuard is an open-source MSFS add-on diagnostics tool (in development) that inspects the structure, metadata, and file consistency of add-on packages under your Community folder, and reports potential issues in the most explainable way possible.
