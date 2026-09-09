@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
+from i18n import tr
+
 
 # 终端 / 文本展示时每条 issue 明细最多显示多少项。
 # issue["details"] 始终保存完整列表，供分类器与 JSON 报告使用。
@@ -320,7 +322,7 @@ def analyze_community_with_stats(addons, full_scan=False, workers=None):
                 "MANIFEST_MISSING_TITLE",
                 "warning",
                 addon["folder_name"],
-                "manifest.json 缺少 title"
+                tr("issue.manifest.title")
             ))
 
         if not addon["type"]:
@@ -328,7 +330,7 @@ def analyze_community_with_stats(addons, full_scan=False, workers=None):
                 "MANIFEST_MISSING_CONTENT_TYPE",
                 "warning",
                 addon["folder_name"],
-                "manifest.json 缺少 content_type"
+                tr("issue.manifest.content_type")
             ))
 
         if not addon["version"]:
@@ -336,7 +338,7 @@ def analyze_community_with_stats(addons, full_scan=False, workers=None):
                 "MANIFEST_MISSING_VERSION",
                 "warning",
                 addon["folder_name"],
-                "manifest.json 缺少 package_version"
+                tr("issue.manifest.version")
             ))
 
         # === Layout 读取 ===
@@ -348,7 +350,7 @@ def analyze_community_with_stats(addons, full_scan=False, workers=None):
                 "LAYOUT_MISSING",
                 "info",
                 addon["folder_name"],
-                "缺少 layout.json"
+                tr("issue.layout.missing")
             ))
             continue
 
@@ -369,7 +371,7 @@ def analyze_community_with_stats(addons, full_scan=False, workers=None):
                 "LAYOUT_INVALID",
                 "error",
                 addon["folder_name"],
-                f"layout.json 无法解析：{e}"
+                tr("issue.layout.invalid", error=e)
             ))
             continue
 
@@ -389,7 +391,7 @@ def analyze_community_with_stats(addons, full_scan=False, workers=None):
                 "LAYOUT_INVALID_ENTRY",
                 "error",
                 addon["folder_name"],
-                "layout.json 的 content 不是列表"
+                tr("issue.layout.content_not_list")
             ))
             continue
 
@@ -449,7 +451,7 @@ def analyze_community_with_stats(addons, full_scan=False, workers=None):
                 "LAYOUT_DUPLICATE_PATH",
                 "warning",
                 addon["folder_name"],
-                f"layout.json 中发现 {len(duplicate_paths)} 个重复路径声明",
+                tr("issue.layout.duplicate", n=len(duplicate_paths)),
                 duplicate_paths
             ))
 
@@ -458,7 +460,7 @@ def analyze_community_with_stats(addons, full_scan=False, workers=None):
                 "LAYOUT_INVALID_ENTRY",
                 "warning",
                 addon["folder_name"],
-                f"layout.json 中发现 {len(invalid_entries)} 个无效条目",
+                tr("issue.layout.invalid_entry", n=len(invalid_entries)),
                 invalid_entries
             ))
 
@@ -561,7 +563,7 @@ def analyze_community_with_stats(addons, full_scan=False, workers=None):
                 "FILE_TREE_SCAN_INCOMPLETE",
                 "warning",
                 addon["folder_name"],
-                f"有 {len(file_index_errors)} 个路径无法读取，文件检查不完整",
+                tr("issue.tree.incomplete", n=len(file_index_errors)),
                 file_index_errors
             ))
 
@@ -570,7 +572,7 @@ def analyze_community_with_stats(addons, full_scan=False, workers=None):
                 "LAYOUT_FILE_MISSING",
                 "error",
                 addon["folder_name"],
-                f"layout.json 声明的 {len(missing_files)} 个文件不存在",
+                tr("issue.file.missing", n=len(missing_files)),
                 missing_files
             ))
 
@@ -579,7 +581,7 @@ def analyze_community_with_stats(addons, full_scan=False, workers=None):
                 "LAYOUT_FILE_SIZE_MISMATCH",
                 "warning",
                 addon["folder_name"],
-                f"发现 {len(size_mismatches)} 个文件大小与 layout.json 不一致",
+                tr("issue.file.size_mismatch", n=len(size_mismatches)),
                 size_mismatches
             ))
 
@@ -588,7 +590,7 @@ def analyze_community_with_stats(addons, full_scan=False, workers=None):
                 "LAYOUT_UNLISTED_FILE",
                 "info",
                 addon["folder_name"],
-                f"发现 {len(unlisted_files)} 个文件未列入 layout.json",
+                tr("issue.file.unlisted", n=len(unlisted_files)),
                 unlisted_files
             ))
 

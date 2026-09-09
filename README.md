@@ -154,6 +154,8 @@ AeroGuard/
 ├── history_cli.py # 历史 / 基线 CLI
 ├── gui.py         # Tk 原生桌面界面与后台任务协调
 ├── AeroGuard.pyw  # Windows 无控制台启动入口
+├── launcher.py    # 单文件启动器：GUI 与三个 CLI 按子命令分发
+├── i18n.py        # 轻量国际化（zh / en 目录与语言解析）
 ├── tests/         # 自动化测试（stdlib unittest，合成 fixture）
 └── tools/dev/     # 开发期一次性调试脚本（非产品代码）
 ```
@@ -416,6 +418,56 @@ python -m unittest discover
 ```
 
 > 开发期的一次性调试脚本位于 `tools/dev/`，不属于产品代码。
+
+### 打包（Windows 可执行文件）
+
+默认用 PyInstaller 生成**单个文件** `AeroGuard.exe`，同时包含
+桌面界面与全部 CLI（启动器 `launcher.py` 按调用方式分发）：
+
+```powershell
+python -m pip install --user pyinstaller
+powershell -ExecutionPolicy Bypass -File tools\build_exe.ps1
+```
+
+产物 `dist\AeroGuard.exe`（控制台子系统，约 12 MB）：
+
+```text
+双击 / 无参数                   启动原生桌面界面（自动隐藏自身控制台）
+AeroGuard.exe scan <路径> ...    扫描 / JSON 报告 CLI（参数同 python main.py）
+AeroGuard.exe manage <路径> ...  插件管理 CLI（参数同 python manage.py）
+AeroGuard.exe history <路径> ... 历史 / 基线 CLI（参数同 python history_cli.py）
+AeroGuard.exe --help             查看用法
+```
+
+需要沿用独立 exe 时加 `-All`：会额外生成 `aeroguard.exe`、
+`aeroguard-manage.exe`、`aeroguard-history.exe`。
+
+> 单文件 exe 首次启动需要自解压，稍慢属正常现象；产物不含网络行为，
+> 运行时数据仍写入 Community 同级的 `.aeroguard/`。若本机安全软件
+> 误删新构建的 exe，请把 `dist/` 加入排除项后重新构建。
+
+### 语言（中文 / English）
+
+界面语言解析顺序：`--lang`（仅 GUI）→ 环境变量 `AEROGUARD_LANG`
+（如 `en`、`zh`）→ 操作系统界面语言（中文系统默认中文，其余默认英文）。
+
+```powershell
+# GUI 指定英文
+python gui.py D:\MSFS2024_DATA\Community --lang en
+# 或打包后的 AeroGuard.exe
+AeroGuard.exe gui --lang en
+
+# 环境变量方式对 CLI 同样生效（扫描/关系/分类消息会切换语言）
+set AEROGUARD_LANG=en
+python main.py D:\MSFS2024_DATA\Community --mode quick
+```
+
+已覆盖：GUI 全部界面文案与检测规则消息、分类理由、降噪与冲突/依赖说明。
+桌面界面头部提供「语言 / Language」下拉框，可在 中文 / English 之间
+**即时切换**（后台任务运行期间暂不可切换）；已加载结果的说明文案保持
+生成时的语言，重新扫描后会按当前语言生成。
+说明：`manage.py` / `history_cli.py` 的操作错误消息、CLI 报告的结构性
+栏目文字目前仍为中文，属后续增量。
 
 ### JSON 报告结构
 

@@ -28,3 +28,8 @@ Thumbs.db
 reports/
 cache/
 .aeroguard/
+
+# PyInstaller build outputs
+dist/
+build/
+*.spec

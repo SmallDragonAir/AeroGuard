@@ -6,6 +6,8 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 
+from i18n import tr
+
 
 RUNTIME_VFS_ROOTS = {
     "cgl",
@@ -232,16 +234,16 @@ def _analyze_resource_conflicts(packages):
 
         if intentional:
             severity = "info"
-            reason = "检测到声明依赖或显式全局覆盖关系"
+            reason = tr("rel.intentional")
         elif scope == "runtime_vfs" and not same_declared_size:
             severity = "warning"
-            reason = "运行时 VFS 路径重叠且声明大小不同"
+            reason = tr("rel.vfs.diff_size")
         elif scope == "runtime_vfs":
             severity = "info"
-            reason = "运行时 VFS 路径重叠且声明大小相同，仍需哈希或实机确认"
+            reason = tr("rel.vfs.same_size")
         else:
             severity = "info"
-            reason = "路径重叠，但当前静态信息不足以确定实际运行影响"
+            reason = tr("rel.other.overlap")
 
         public_owners = [{
             "package": owner["package"],
@@ -362,9 +364,8 @@ def _analyze_airports(packages):
             "severity": "info" if intentional else "warning",
             "confidence": "heuristic_high",
             "reason": (
-                "同一机场包含 Patch 顺序包，可能是有意覆盖"
-                if intentional else
-                "多个 Package 以至少两个独立静态信号指向同一机场"
+                tr("rel.airport.patch") if intentional else
+                tr("rel.airport.dup")
             ),
             "packages": owners,
             "intentional_override": intentional,
@@ -399,7 +400,7 @@ def _analyze_dependencies(packages):
                 "name": None,
                 "declared_version": None,
                 "status": "invalid",
-                "reason": "manifest dependencies 不是列表",
+                "reason": tr("rel.dep.invalid_list"),
             })
             continue
 
@@ -410,7 +411,7 @@ def _analyze_dependencies(packages):
                     "name": None,
                     "declared_version": None,
                     "status": "invalid",
-                    "reason": "依赖条目不是 JSON 对象",
+                    "reason": tr("rel.dep.invalid_entry"),
                 })
                 continue
 
@@ -422,7 +423,7 @@ def _analyze_dependencies(packages):
                     "name": None,
                     "declared_version": version,
                     "status": "invalid",
-                    "reason": "依赖名称缺失或类型无效",
+                    "reason": tr("rel.dep.invalid_name"),
                 })
                 continue
 
@@ -434,7 +435,7 @@ def _analyze_dependencies(packages):
                     "name": name,
                     "declared_version": version,
                     "status": "outside_scan_scope",
-                    "reason": "当前扫描根目录中未找到；可能位于 Official 或其他包源",
+                    "reason": tr("rel.dep.outside_scope"),
                 })
                 continue
 

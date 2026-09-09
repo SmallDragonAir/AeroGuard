@@ -2,6 +2,8 @@
 
 from pathlib import Path, PurePosixPath
 
+from i18n import tr
+
 
 SIZE_MISMATCH_RULE = "LAYOUT_FILE_SIZE_MISMATCH"
 LINE_ENDING_RULE = "TEXT_LINE_ENDING_NORMALIZATION"
@@ -135,9 +137,7 @@ def apply_noise_rules(issues, addons):
         issue["original_severity"] = issue["severity"]
         issue["severity"] = "info"
         issue["downgrade_rule"] = LINE_ENDING_RULE
-        issue["downgrade_reason"] = (
-            "代表样本的大小差均精确符合 CRLF 转 LF 的换行规范化特征"
-        )
+        issue["downgrade_reason"] = tr("noise.crlf_reason")
         issue["downgrade_evidence"] = {
             "sampled_files": len(sample),
             "total_files": len(details),

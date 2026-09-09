@@ -9,6 +9,8 @@ from gui import (
     management_table_rows,
     parse_args,
     run_desktop_scan,
+    _lang_code_from_display,
+    _lang_display_name,
 )
 from relationships import RelationshipAnalysis
 
@@ -104,6 +106,17 @@ class GuiDataTest(unittest.TestCase):
 
         self.assertEqual(args.community_path, "C:/Community")
         self.assertEqual(args.mode, "full")
+
+    def test_language_display_mapping(self):
+        from i18n import set_language
+        set_language("zh")
+        self.assertEqual(_lang_display_name(), "中文")
+        set_language("en")
+        self.assertEqual(_lang_display_name(), "English")
+        self.assertEqual(_lang_code_from_display("中文"), "zh")
+        self.assertEqual(_lang_code_from_display("English"), "en")
+        # 恢复默认，避免影响同进程内后续用例
+        set_language("zh")
 
 
 if __name__ == "__main__":

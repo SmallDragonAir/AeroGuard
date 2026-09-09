@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+from i18n import current_language, set_language, tr
 from main import run_full_diagnosis, save_json_report
 from history import HistoryError, HistoryStore
 from management import AddonManager, ManagementError
@@ -17,6 +18,16 @@ from report import build_report
 
 
 SEVERITY_ORDER = {"error": 3, "warning": 2, "info": 1}
+
+_LANG_OPTIONS = ("中文", "English")
+
+
+def _lang_display_name():
+    return "中文" if current_language() == "zh" else "English"
+
+
+def _lang_code_from_display(name):
+    return "zh" if name == "中文" else "en"
 
 
 @dataclass
@@ -47,9 +58,9 @@ def run_desktop_scan(community_path, mode):
     """运行一次供 GUI 使用的完整诊断流程（与 CLI 共用同一实现）。"""
     path = Path(community_path).expanduser().resolve()
     if not path.is_dir():
-        raise ValueError(f"Community 路径不存在或不是目录：{path}")
+        raise ValueError(tr("gui.err.not_dir", path=path))
     if mode not in {"quick", "full"}:
-        raise ValueError(f"不支持的扫描模式：{mode}")
+        raise ValueError(tr("gui.err.bad_mode", mode=mode))
 
     addons, scan_errors, issues, stats, relationships, timing = (
         run_full_diagnosis(path, full_scan=(mode == "full"))
@@ -116,7 +127,7 @@ def conflict_table_rows(relationships):
     for conflict in relationships.resource_conflicts:
         rows.append({
             "values": (
-                "资源",
+                tr("gui.row.type_resource"),
                 conflict["severity"].upper(),
                 conflict["path"],
                 ", ".join(item["package"] for item in conflict["packages"]),
@@ -127,7 +138,7 @@ def conflict_table_rows(relationships):
     for conflict in relationships.airport_conflicts:
         rows.append({
             "values": (
-                "机场",
+                tr("gui.row.type_airport"),
                 conflict["severity"].upper(),
                 conflict["airport_code"],
                 ", ".join(item["package"] for item in conflict["packages"]),
@@ -139,11 +150,11 @@ def conflict_table_rows(relationships):
         detail = {"packages": cycle, "type": "dependency_cycle"}
         rows.append({
             "values": (
-                "依赖环",
+                tr("gui.row.type_cycle"),
                 "WARNING",
                 " → ".join(cycle + cycle[:1]),
                 ", ".join(cycle),
-                "当前扫描根目录内存在循环依赖",
+                tr("rel.cycle.exists"),
             ),
             "detail": detail,
         })
@@ -182,7 +193,10 @@ class AeroGuardApp:
 
         self.path_var = tk.StringVar(value=str(community_path or ""))
         self.mode_var = tk.StringVar(value=mode)
-        self.status_var = tk.StringVar(value="请选择 Community 路径后开始扫描。")
+        self.lang_var = tk.StringVar(value=_lang_display_name())
+        self.status_var = tk.StringVar(value=tr("gui.status.choose_first"))
+        self._has_inventory = False
+        self._has_history = False
         self.summary_vars = {
             key: tk.StringVar(value="—")
             for key in (
@@ -198,7 +212,7 @@ class AeroGuardApp:
         self._build_status_bar()
 
     def _configure_window(self):
-        self.root.title("AeroGuard — MSFS 插件诊断与管理")
+        self.root.title(tr("gui.window.title"))
         self.root.geometry("1280x800")
         self.root.minsize(980, 640)
         self.root.option_add("*Font", "{Segoe UI} 10")
@@ -221,13 +235,13 @@ class AeroGuardApp:
         )
         ttk.Label(
             frame,
-            text="本地、可解释的 MSFS Package 诊断与管理",
+            text=tr("app.subtitle"),
         ).grid(row=1, column=0, sticky="w", columnspan=5, pady=(0, 12))
 
-        ttk.Label(frame, text="Community").grid(row=2, column=0, sticky="w")
+        ttk.Label(frame, text=tr("gui.field.community")).grid(row=2, column=0, sticky="w")
         path_entry = ttk.Entry(frame, textvariable=self.path_var)
         path_entry.grid(row=2, column=1, sticky="ew", padx=(8, 6))
-        ttk.Button(frame, text="浏览…", command=self._browse_community).grid(
+        ttk.Button(frame, text=tr("gui.button.browse"), command=self._browse_community).grid(
             row=2, column=2, padx=(0, 12)
         )
         ttk.Combobox(
@@ -238,29 +252,41 @@ class AeroGuardApp:
             width=8,
         ).grid(row=2, column=3, padx=(0, 8))
         self.scan_button = ttk.Button(
-            frame, text="开始扫描", command=self._start_scan
+            frame, text=tr("gui.button.start_scan"), command=self._start_scan
         )
         self.scan_button.grid(row=2, column=4)
         self.export_button = ttk.Button(
             frame,
-            text="导出 JSON",
+            text=tr("gui.button.export_json"),
             command=self._export_json,
             state="disabled",
         )
         self.export_button.grid(row=2, column=5, padx=(8, 0))
+        ttk.Label(frame, text=tr("gui.lang.label")).grid(
+            row=2, column=6, sticky="e", padx=(14, 4)
+        )
+        self.lang_box = ttk.Combobox(
+            frame,
+            textvariable=self.lang_var,
+            values=_LANG_OPTIONS,
+            state="readonly",
+            width=9,
+        )
+        self.lang_box.grid(row=2, column=7, padx=(0, 4))
+        self.lang_box.bind("<<ComboboxSelected>>", self._on_language_change)
         frame.columnconfigure(1, weight=1)
 
     def _build_summary(self):
         frame = ttk.Frame(self.root, padding=(18, 4, 18, 10))
         frame.pack(fill="x")
         metrics = (
-            ("addons", "插件"),
-            ("issues", "问题"),
-            ("errors", "错误"),
-            ("warnings", "警告"),
-            ("resource_conflicts", "资源重叠"),
-            ("airport_conflicts", "机场重复"),
-            ("elapsed_s", "耗时 / 秒"),
+            ("addons", tr("gui.metric.addons")),
+            ("issues", tr("gui.metric.issues")),
+            ("errors", tr("gui.metric.errors")),
+            ("warnings", tr("gui.metric.warnings")),
+            ("resource_conflicts", tr("gui.metric.resource_conflicts")),
+            ("airport_conflicts", tr("gui.metric.airport_conflicts")),
+            ("elapsed_s", tr("gui.metric.elapsed")),
         )
         for column, (key, label) in enumerate(metrics):
             card = ttk.LabelFrame(frame, text=label, padding=(14, 8))
@@ -298,10 +324,12 @@ class AeroGuardApp:
 
         _, self.issue_tree = self._tree_tab(
             self.notebook,
-            "问题",
+            tr("gui.tab.issues"),
             {
-                "severity": "等级", "rule": "规则", "package": "插件",
-                "affected": "数量", "impact": "运行影响", "message": "说明",
+                "severity": tr("gui.head.severity"), "rule": tr("gui.head.rule"),
+                "package": tr("gui.head.package"),
+                "affected": tr("gui.head.affected"),
+                "impact": tr("gui.head.impact"), "message": tr("gui.head.message"),
             },
             {
                 "severity": 80, "rule": 190, "package": 230,
@@ -312,10 +340,12 @@ class AeroGuardApp:
 
         _, self.conflict_tree = self._tree_tab(
             self.notebook,
-            "冲突与依赖",
+            tr("gui.tab.conflicts"),
             {
-                "type": "类型", "severity": "等级", "resource": "资源 / 代码",
-                "packages": "涉及插件", "reason": "判断",
+                "type": tr("gui.head.type"), "severity": tr("gui.head.severity"),
+                "resource": tr("gui.head.resource"),
+                "packages": tr("gui.head.packages"),
+                "reason": tr("gui.head.reason"),
             },
             {
                 "type": 80, "severity": 80, "resource": 300,
@@ -326,10 +356,12 @@ class AeroGuardApp:
 
         management_frame, self.management_tree = self._tree_tab(
             self.notebook,
-            "插件管理",
+            tr("gui.tab.management"),
             {
-                "status": "状态", "package": "包目录", "version": "版本",
-                "type": "类型", "title": "标题", "error": "元数据异常",
+                "status": tr("gui.head.status"), "package": tr("gui.head.folder"),
+                "version": tr("gui.head.version"),
+                "type": tr("gui.head.type"), "title": tr("gui.head.title"),
+                "error": tr("gui.head.meta_error"),
             },
             {
                 "status": 90, "package": 260, "version": 100,
@@ -339,16 +371,16 @@ class AeroGuardApp:
         button_bar = ttk.Frame(management_frame, padding=(0, 8, 0, 0))
         button_bar.grid(row=2, column=0, columnspan=2, sticky="ew")
         for text, command in (
-            ("刷新清单", self._refresh_inventory),
-            ("启用", lambda: self._manage_selected("enable")),
-            ("禁用", lambda: self._manage_selected("disable")),
-            ("隔离", lambda: self._manage_selected("quarantine")),
-            ("恢复", lambda: self._manage_selected("restore")),
-            ("保存 Profile", self._save_profile),
-            ("应用 Profile", self._apply_profile),
-            ("安装 ZIP", self._choose_install_zip),
-            ("安装目录", self._choose_install_directory),
-            ("回滚安装", self._rollback_install),
+            (tr("gui.action.refresh_inventory"), self._refresh_inventory),
+            (tr("gui.action.enable"), lambda: self._manage_selected("enable")),
+            (tr("gui.action.disable"), lambda: self._manage_selected("disable")),
+            (tr("gui.action.quarantine"), lambda: self._manage_selected("quarantine")),
+            (tr("gui.action.restore"), lambda: self._manage_selected("restore")),
+            (tr("gui.action.save_profile"), self._save_profile),
+            (tr("gui.action.apply_profile"), self._apply_profile),
+            (tr("gui.action.install_zip"), self._choose_install_zip),
+            (tr("gui.action.install_dir"), self._choose_install_directory),
+            (tr("gui.action.rollback_install"), self._rollback_install),
         ):
             ttk.Button(button_bar, text=text, command=command).pack(
                 side="left", padx=(0, 6)
@@ -357,11 +389,14 @@ class AeroGuardApp:
 
         history_frame, self.history_tree = self._tree_tab(
             self.notebook,
-            "历史与基线",
+            tr("gui.tab.history"),
             {
-                "time": "记录时间", "id": "快照 ID", "label": "标签",
-                "mode": "模式", "addons": "插件", "issues": "问题",
-                "conflicts": "资源重叠", "error": "异常",
+                "time": tr("gui.head.time"), "id": tr("gui.head.id"),
+                "label": tr("gui.head.label"),
+                "mode": tr("gui.head.mode"), "addons": tr("gui.head.addons"),
+                "issues": tr("gui.head.issues"),
+                "conflicts": tr("gui.head.conflicts"),
+                "error": tr("gui.head.error"),
             },
             {
                 "time": 175, "id": 220, "label": 160, "mode": 70,
@@ -371,10 +406,10 @@ class AeroGuardApp:
         history_buttons = ttk.Frame(history_frame, padding=(0, 8, 0, 0))
         history_buttons.grid(row=2, column=0, columnspan=2, sticky="ew")
         for text, command in (
-            ("刷新历史", self._refresh_history),
-            ("记录当前结果", self._record_current_snapshot),
-            ("设为基线", self._set_selected_baseline),
-            ("与基线比较", self._compare_current_baseline),
+            (tr("gui.action.refresh_history"), self._refresh_history),
+            (tr("gui.action.record_snapshot"), self._record_current_snapshot),
+            (tr("gui.action.set_baseline"), self._set_selected_baseline),
+            (tr("gui.action.compare_baseline"), self._compare_current_baseline),
         ):
             ttk.Button(history_buttons, text=text, command=command).pack(
                 side="left", padx=(0, 6)
@@ -382,7 +417,7 @@ class AeroGuardApp:
         self.history_tree.bind("<Double-1>", self._show_selected_detail)
 
         errors_frame = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(errors_frame, text="扫描异常")
+        self.notebook.add(errors_frame, text=tr("gui.tab.scan_errors"))
         self.error_text = tk.Text(errors_frame, wrap="word", state="disabled")
         error_scroll = ttk.Scrollbar(
             errors_frame, orient="vertical", command=self.error_text.yview
@@ -401,7 +436,7 @@ class AeroGuardApp:
         self.progress.pack(side="right")
 
     def _browse_community(self):
-        selected = filedialog.askdirectory(title="选择 Community 文件夹")
+        selected = filedialog.askdirectory(title=tr("gui.prompt.choose_community"))
         if selected:
             self.path_var.set(selected)
             self._refresh_inventory()
@@ -409,10 +444,10 @@ class AeroGuardApp:
     def _community_path(self):
         value = self.path_var.get().strip().strip('"')
         if not value:
-            raise ValueError("请先选择 Community 路径")
+            raise ValueError(tr("gui.err.choose_community"))
         path = Path(value).expanduser().resolve()
         if not path.is_dir():
-            raise ValueError(f"Community 路径不存在或不是目录：{path}")
+            raise ValueError(tr("gui.err.not_dir", path=path))
         return path
 
     def _manager(self):
@@ -425,18 +460,54 @@ class AeroGuardApp:
         """关闭窗口前确认：后台任务（如安装/回滚）仍在运行时先询问。"""
         if self._busy:
             confirmed = messagebox.askokcancel(
-                "AeroGuard",
-                "后台任务仍在运行，现在退出可能中断正在进行的操作。"
-                "确定要退出吗？",
+                tr("gui.dialog.close_busy_title"),
+                tr("gui.dialog.close_busy_text"),
                 parent=self.root,
             )
             if not confirmed:
                 return
         self.root.destroy()
 
+    def _on_language_change(self, event=None):
+        """头部语言下拉框切换：即时重建界面文案并保留已有数据。"""
+        code = _lang_code_from_display(self.lang_var.get())
+        if code == current_language():
+            return
+        if self._busy:
+            self.lang_var.set(_lang_display_name())
+            self.status_var.set(tr("gui.lang.busy"))
+            return
+        set_language(code)
+        self.lang_var.set(_lang_display_name())
+        self._rebuild_ui()
+
+    def _rebuild_ui(self):
+        """按当前语言重建静态界面；已加载的扫描/清单/历史数据保持不变。"""
+        result = self.result
+        for child in list(self.root.winfo_children()):
+            child.destroy()
+        self._detail_by_item.clear()
+        self._management_by_item.clear()
+
+        self.root.title(tr("gui.window.title"))
+        self._build_header()
+        self._build_summary()
+        self._build_tabs()
+        self._build_status_bar()
+
+        if result is not None:
+            # 会重填问题/冲突/异常页签，并异步刷新管理清单
+            self._receive_scan(result)
+        else:
+            has_path = bool(self.path_var.get().strip().strip('"'))
+            if self._has_inventory and has_path:
+                self._refresh_inventory()
+        if self._has_history:
+            self._refresh_history()
+
     def _run_async(self, label, task, on_success):
         if self._busy:
-            self.status_var.set("已有任务正在运行，请等待完成。")
+            self.status_var.set(tr("gui.err.task_busy"))
             return
         self._busy = True
         self.scan_button.configure(state="disabled")
@@ -463,14 +534,18 @@ class AeroGuardApp:
         self.scan_button.configure(state="normal")
         self.progress.stop()
         if not succeeded:
-            self.status_var.set("任务失败。")
-            messagebox.showerror("AeroGuard", str(payload), parent=self.root)
+            self.status_var.set(tr("gui.err.task_failed"))
+            messagebox.showerror(
+                tr("gui.dialog.close_busy_title"), str(payload), parent=self.root
+            )
             return
         try:
             callback(payload)
         except Exception as error:
-            self.status_var.set("结果呈现失败。")
-            messagebox.showerror("AeroGuard", str(error), parent=self.root)
+            self.status_var.set(tr("gui.err.render_failed"))
+            messagebox.showerror(
+                tr("gui.dialog.close_busy_title"), str(error), parent=self.root
+            )
 
     def _start_scan(self):
         try:
@@ -479,8 +554,10 @@ class AeroGuardApp:
             messagebox.showerror("AeroGuard", str(error), parent=self.root)
             return
         mode = self.mode_var.get()
+        label = tr("gui.status.scan_full") if mode == "full" \
+            else tr("gui.status.scan_quick")
         self._run_async(
-            f"正在执行{'完整' if mode == 'full' else '快速'}扫描…",
+            label,
             lambda: run_desktop_scan(path, mode),
             self._receive_scan,
         )
@@ -511,16 +588,17 @@ class AeroGuardApp:
         )
         self._set_error_text(result.scan_errors)
         self.export_button.configure(state="normal")
-        self.status_var.set(
-            f"扫描完成：{summary['addons']} 个插件，{summary['issues']} 条问题，"
-            f"耗时 {summary['elapsed_s']:.2f} 秒。双击表格行可查看完整数据。"
-        )
+        self.status_var.set(tr(
+            "gui.status.scan_done",
+            addons=summary["addons"], issues=summary["issues"],
+            elapsed=summary["elapsed_s"],
+        ))
         self._refresh_inventory()
 
     def _set_error_text(self, errors):
         text = (
             json.dumps(errors, ensure_ascii=False, indent=2)
-            if errors else "没有扫描异常。"
+            if errors else tr("gui.no_scan_errors")
         )
         self.error_text.configure(state="normal")
         self.error_text.delete("1.0", "end")
@@ -547,26 +625,26 @@ class AeroGuardApp:
         item_id = event.widget.focus()
         detail = self._detail_by_item.get(item_id)
         if detail is not None:
-            self._show_json_detail("检测详情", detail)
+            self._show_json_detail(tr("gui.detail.issue"), detail)
 
     def _show_management_detail(self, event):
         item_id = event.widget.focus()
         detail = self._management_by_item.get(item_id)
         if detail is not None:
-            self._show_json_detail("插件详情", detail)
+            self._show_json_detail(tr("gui.detail.addon"), detail)
 
     def _export_json(self):
         if self.result is None:
             return
         filename = filedialog.asksaveasfilename(
-            title="导出 AeroGuard JSON 报告",
+            title=tr("gui.export.title"),
             defaultextension=".json",
-            filetypes=(("JSON", "*.json"), ("所有文件", "*.*")),
+            filetypes=(("JSON", "*.json"), (tr("gui.export.all_files"), "*.*")),
         )
         if not filename:
             return
         output = save_json_report(self.result.report_document(), filename)
-        self.status_var.set(f"JSON 报告已保存：{output}")
+        self.status_var.set(tr("gui.status.json_saved", path=output))
 
     def _refresh_inventory(self):
         try:
@@ -574,9 +652,10 @@ class AeroGuardApp:
         except (ValueError, ManagementError) as error:
             self.status_var.set(str(error))
             return
-        self._run_async("正在刷新插件管理清单…", manager.inventory, self._receive_inventory)
+        self._run_async(tr("gui.status.refreshing_inventory"), manager.inventory, self._receive_inventory)
 
     def _receive_inventory(self, inventory):
+        self._has_inventory = True
         self._clear_tree(self.management_tree)
         self._management_by_item.clear()
         rows = management_table_rows(inventory)
@@ -585,15 +664,17 @@ class AeroGuardApp:
             self.management_tree.insert("", "end", iid=item_id, values=row["values"])
             self._management_by_item[item_id] = row["detail"]
         summary = inventory["summary"]
-        self.status_var.set(
-            f"管理清单：启用 {summary['enabled']}，禁用 {summary['disabled']}，"
-            f"隔离 {summary['quarantined']}，无效目录 {summary['invalid_entries']}。"
-        )
+        self.status_var.set(tr(
+            "gui.status.inventory_done",
+            enabled=summary["enabled"], disabled=summary["disabled"],
+            quarantined=summary["quarantined"],
+            invalid=summary["invalid_entries"],
+        ))
 
     def _selected_management_record(self):
         selection = self.management_tree.selection()
         if not selection:
-            raise ManagementError("请先在插件管理表格中选择一个包")
+            raise ManagementError(tr("gui.err.select_management_row"))
         return self._management_by_item[selection[0]]
 
     def _manage_selected(self, action):
@@ -602,18 +683,20 @@ class AeroGuardApp:
             manager = self._manager()
             status = record["status"]
             if action == "enable" and status != "disabled":
-                raise ManagementError("只有禁用状态的包可以启用")
+                raise ManagementError(tr("gui.err.only_disabled_enable"))
             if action == "disable" and status != "enabled":
-                raise ManagementError("只有启用状态的包可以禁用")
+                raise ManagementError(tr("gui.err.only_enabled_disable"))
             if action == "restore" and status != "quarantined":
-                raise ManagementError("只有隔离状态的包可以恢复")
+                raise ManagementError(tr("gui.err.only_quarantined_restore"))
             if action == "quarantine" and status == "quarantined":
-                raise ManagementError("该包已经位于隔离区")
+                raise ManagementError(tr("gui.err.already_quarantined"))
             reason = "GUI manual quarantine"
             if action == "quarantine":
                 reason = simpledialog.askstring(
-                    "隔离原因", "记录隔离原因：", parent=self.root,
-                    initialvalue="待排查冲突",
+                    tr("gui.dialog.quarantine_reason_title"),
+                    tr("gui.dialog.quarantine_reason_prompt"),
+                    parent=self.root,
+                    initialvalue=tr("gui.dialog.quarantine_initial"),
                 )
                 if reason is None:
                     return
@@ -625,21 +708,29 @@ class AeroGuardApp:
                 "restore": lambda: manager.restore_quarantine(record["package"]),
             }
             self._run_async(
-                f"正在执行：{action} {record['package']}…",
+                tr("gui.status.operation_prefix",
+                   action=action, package=record["package"]),
                 operations[action],
                 self._receive_management_action,
             )
         except (ValueError, ManagementError) as error:
-            messagebox.showerror("AeroGuard", str(error), parent=self.root)
+            messagebox.showerror(
+                tr("gui.dialog.close_busy_title"), str(error), parent=self.root
+            )
 
     def _receive_management_action(self, transaction):
         warnings = transaction.get("dependency_warnings", [])
-        suffix = f"；依赖警告 {len(warnings)} 条" if warnings else ""
-        self.status_var.set(
-            f"操作完成，事务 {transaction['id']}{suffix}。重启模拟器后生效。"
-        )
+        suffix = ""
         if warnings:
-            self._show_json_detail("依赖警告", warnings)
+            suffix = tr("gui.status.dependency_warning_suffix",
+                        n=len(warnings))
+        self.status_var.set(tr(
+            "gui.status.operation_done", tid=transaction["id"], suffix=suffix
+        ))
+        if warnings:
+            self._show_json_detail(
+                tr("gui.detail.dependency_warnings"), warnings
+            )
         self.root.after(100, self._refresh_inventory)
 
     def _refresh_history(self):
@@ -649,12 +740,13 @@ class AeroGuardApp:
             self.status_var.set(str(error))
             return
         self._run_async(
-            "正在读取扫描历史…",
+            tr("gui.status.reading_history"),
             lambda: store.list_snapshots(limit=100),
             self._receive_history,
         )
 
     def _receive_history(self, snapshots):
+        self._has_history = True
         rows = []
         for snapshot in snapshots:
             summary = snapshot.get("summary", {})
@@ -672,13 +764,15 @@ class AeroGuardApp:
                 "detail": snapshot,
             })
         self._fill_detail_tree(self.history_tree, rows)
-        self.status_var.set(f"已读取 {len(snapshots)} 个扫描历史快照。")
+        self.status_var.set(
+            tr("gui.status.history_count", n=len(snapshots))
+        )
 
     def _current_report_for_history(self):
         if self.result is None:
-            raise HistoryError("请先完成一次扫描")
+            raise HistoryError(tr("gui.err.need_scan_first"))
         if self.result.community_path != self._community_path():
-            raise HistoryError("路径已改变，请先重新扫描当前 Community")
+            raise HistoryError(tr("gui.err.path_changed"))
         return self.result.report_document()
 
     def _record_current_snapshot(self):
@@ -689,17 +783,20 @@ class AeroGuardApp:
             messagebox.showerror("AeroGuard", str(error), parent=self.root)
             return
         label = simpledialog.askstring(
-            "记录扫描历史", "可选标签：", parent=self.root
+            tr("gui.dialog.record_history"), tr("gui.dialog.label_prompt"),
+            parent=self.root,
         )
         if label is None:
             return
 
         def receive(snapshot):
-            self.status_var.set(f"快照已保存：{snapshot['snapshot_id']}")
+            self.status_var.set(
+                tr("gui.status.snapshot_saved", sid=snapshot["snapshot_id"])
+            )
             self.root.after(100, self._refresh_history)
 
         self._run_async(
-            "正在保存紧凑扫描快照…",
+            tr("gui.status.record_snapshot"),
             lambda: store.record(report, label=label or None),
             receive,
         )
@@ -707,10 +804,10 @@ class AeroGuardApp:
     def _selected_snapshot(self):
         selection = self.history_tree.selection()
         if not selection:
-            raise HistoryError("请先选择一个历史快照")
+            raise HistoryError(tr("gui.err.no_snapshot_selected"))
         snapshot = self._detail_by_item.get(selection[0])
         if not snapshot or snapshot.get("error"):
-            raise HistoryError("所选历史快照不可用")
+            raise HistoryError(tr("gui.err.snapshot_unavailable"))
         return snapshot
 
     def _set_selected_baseline(self):
@@ -718,16 +815,21 @@ class AeroGuardApp:
             snapshot = self._selected_snapshot()
             store = self._history_store()
         except (ValueError, HistoryError) as error:
-            messagebox.showerror("AeroGuard", str(error), parent=self.root)
+            messagebox.showerror(
+                tr("gui.dialog.close_busy_title"), str(error), parent=self.root
+            )
             return
-        name = simpledialog.askstring("设置环境基线", "基线名称：", parent=self.root)
+        name = simpledialog.askstring(
+            tr("gui.dialog.set_baseline"), tr("gui.dialog.baseline_name"),
+            parent=self.root,
+        )
         if not name:
             return
         self._run_async(
-            f"正在设置基线 {name}…",
+            tr("gui.status.set_baseline_running", name=name),
             lambda: store.set_baseline(name, snapshot["snapshot_id"]),
             lambda result: self.status_var.set(
-                f"环境基线已保存：{result['baseline_name']}"
+                tr("gui.status.baseline_saved", name=result["baseline_name"])
             ),
         )
 
@@ -736,51 +838,70 @@ class AeroGuardApp:
             store = self._history_store()
             report = self._current_report_for_history()
         except (ValueError, HistoryError) as error:
-            messagebox.showerror("AeroGuard", str(error), parent=self.root)
+            messagebox.showerror(
+                tr("gui.dialog.close_busy_title"), str(error), parent=self.root
+            )
             return
-        name = simpledialog.askstring("比较环境基线", "基线名称：", parent=self.root)
+        name = simpledialog.askstring(
+            tr("gui.dialog.compare_baseline"), tr("gui.dialog.baseline_name2"),
+            parent=self.root,
+        )
         if not name:
             return
 
         def receive(comparison):
             changes = comparison["summary"]["total_changes"]
             warnings = comparison["summary"]["compatibility_warnings"]
-            self.status_var.set(
-                f"基线比较完成：{changes} 项变化，{warnings} 条兼容性提示。"
+            self.status_var.set(tr(
+                "gui.status.baseline_compare_done",
+                changes=changes, warnings=warnings,
+            ))
+            self._show_json_detail(
+                tr("gui.dialog.compare_baseline") + f" — {name}",
+                comparison,
             )
-            self._show_json_detail(f"基线比较 — {name}", comparison)
 
         self._run_async(
-            f"正在与基线 {name} 比较…",
+            tr("gui.status.compare_running", name=name),
             lambda: store.compare(name, report),
             receive,
         )
 
     def _save_profile(self):
-        name = simpledialog.askstring("保存 Profile", "Profile 名称：", parent=self.root)
+        name = simpledialog.askstring(
+            tr("gui.dialog.save_profile"), tr("gui.dialog.profile_name"),
+            parent=self.root,
+        )
         if not name:
             return
         try:
             manager = self._manager()
         except (ValueError, ManagementError) as error:
-            messagebox.showerror("AeroGuard", str(error), parent=self.root)
+            messagebox.showerror(
+                tr("gui.dialog.close_busy_title"), str(error), parent=self.root
+            )
             return
         self._run_async(
-            f"正在保存 Profile {name}…",
+            tr("gui.status.save_profile_running", name=name),
             lambda: manager.save_profile(name),
             lambda result: self.status_var.set(
-                f"Profile 已保存：{result['profile_path']}"
+                tr("gui.status.profile_saved", path=result["profile_path"])
             ),
         )
 
     def _apply_profile(self):
-        name = simpledialog.askstring("应用 Profile", "Profile 名称：", parent=self.root)
+        name = simpledialog.askstring(
+            tr("gui.dialog.apply_profile"), tr("gui.dialog.profile_name2"),
+            parent=self.root,
+        )
         if not name:
             return
         try:
             manager = self._manager()
         except (ValueError, ManagementError) as error:
-            messagebox.showerror("AeroGuard", str(error), parent=self.root)
+            messagebox.showerror(
+                tr("gui.dialog.close_busy_title"), str(error), parent=self.root
+            )
             return
 
         def receive_plan(plan):
@@ -789,37 +910,39 @@ class AeroGuardApp:
                 plan.get("dependency_warnings", [])
             )
             if move_count == 0:
-                self.status_var.set(f"Profile {name} 已处于目标状态。")
+                self.status_var.set(
+                    tr("gui.status.profile_applied_already", name=name)
+                )
                 return
             accepted = messagebox.askyesno(
-                "应用 Profile",
-                f"Profile {name} 将移动 {move_count} 个包，"
-                f"有 {warning_count} 条提示。是否应用？",
+                tr("gui.dialog.apply_profile"),
+                tr("gui.dialog.apply_profile_confirm",
+                   name=name, moves=move_count, warnings=warning_count),
                 parent=self.root,
             )
             if accepted:
                 self._run_async(
-                    f"正在应用 Profile {name}…",
+                    tr("gui.status.apply_profile_running", name=name),
                     lambda: manager.apply_profile(name),
                     self._receive_management_action,
                 )
 
         self._run_async(
-            f"正在预演 Profile {name}…",
+            tr("gui.status.profile_dry_run", name=name),
             lambda: manager.apply_profile(name, dry_run=True),
             receive_plan,
         )
 
     def _choose_install_zip(self):
         source = filedialog.askopenfilename(
-            title="选择插件 ZIP",
-            filetypes=(("ZIP", "*.zip"), ("所有文件", "*.*")),
+            title=tr("gui.dialog.choose_zip"),
+            filetypes=(("ZIP", "*.zip"), (tr("gui.export.all_files"), "*.*")),
         )
         if source:
             self._inspect_then_offer_install(source)
 
     def _choose_install_directory(self):
-        source = filedialog.askdirectory(title="选择插件目录或包集合目录")
+        source = filedialog.askdirectory(title=tr("gui.dialog.choose_dir"))
         if source:
             self._inspect_then_offer_install(source)
 
@@ -833,48 +956,56 @@ class AeroGuardApp:
         def receive_inspection(inspection):
             summary = inspection.summary()
             if not inspection.can_install:
-                self._show_json_detail("安装前检查未通过", inspection.as_dict())
-                self.status_var.set("安装前检查未通过，Community 未发生变化。")
+                self._show_json_detail(
+                    tr("gui.dialog.install_check_title"),
+                    inspection.as_dict(),
+                )
+                self.status_var.set(tr("gui.dialog.inspect_not_passed"))
                 return
             package_names = ", ".join(
                 item["folder_name"] for item in inspection.packages
             )
             allow_executables = inspection.requires_executable_override
-            executable_note = (
-                f"\n检测到 {summary['executable_files']} 个可执行文件；"
-                "AeroGuard 只复制、不执行。"
-                if allow_executables else ""
-            )
+            executable_note = ""
+            if allow_executables:
+                executable_note = tr(
+                    "gui.dialog.executable_note",
+                    n=summary["executable_files"],
+                )
             accepted = messagebox.askyesno(
-                "安装检查完成",
-                f"包：{package_names}\n问题：{summary['issues']} 条"
-                f"{executable_note}\n\n是否开始安装？",
+                tr("gui.dialog.install_check_title"),
+                tr("gui.dialog.install_done_offer",
+                   packages=package_names,
+                   issues=summary["issues"], note=executable_note),
                 parent=self.root,
             )
             if accepted:
                 self._run_async(
-                    "正在安装并保存可回滚备份…",
+                    tr("gui.status.install_running"),
                     lambda: manager.install(source, allow_executables),
                     self._receive_install,
                 )
 
         self._run_async(
-            "正在暂存并检查安装源…",
+            tr("gui.status.inspect_running"),
             lambda: manager.inspect_install_source(source),
             receive_inspection,
         )
 
     def _receive_install(self, result):
         transaction = result["transaction"]
-        self.status_var.set(
-            f"安装完成，事务 {transaction['id']}。重启模拟器后生效。"
+        self.status_var.set(tr(
+            "gui.status.install_done", tid=transaction["id"]
+        ))
+        self._show_json_detail(
+            tr("gui.detail.install_transaction"), transaction
         )
-        self._show_json_detail("安装事务", transaction)
         self.root.after(100, self._refresh_inventory)
 
     def _rollback_install(self):
         transaction_id = simpledialog.askstring(
-            "回滚安装", "安装事务 ID：", parent=self.root
+            tr("gui.dialog.rollback_title"), tr("gui.dialog.rollback_prompt"),
+            parent=self.root,
         )
         if not transaction_id:
             return
@@ -884,7 +1015,7 @@ class AeroGuardApp:
             messagebox.showerror("AeroGuard", str(error), parent=self.root)
             return
         self._run_async(
-            f"正在回滚安装事务 {transaction_id}…",
+            tr("gui.status.rollback_running", tid=transaction_id),
             lambda: manager.rollback_install(transaction_id),
             self._receive_management_action,
         )
@@ -897,6 +1028,10 @@ def parse_args(argv=None):
     )
     parser.add_argument("community_path", nargs="?", default="")
     parser.add_argument("--mode", choices=("quick", "full"), default="quick")
+    parser.add_argument(
+        "--lang", choices=("zh", "en", "zh-CN", "en-US"),
+        help="界面语言（缺省按系统语言；也可用环境变量 AEROGUARD_LANG）",
+    )
     parser.add_argument("--state-dir")
     return parser.parse_args(argv)
 
@@ -908,6 +1043,7 @@ def main(argv=None):
     except (AttributeError, OSError):
         pass
     args = parse_args(argv)
+    set_language(args.lang)
     root = tk.Tk()
     AeroGuardApp(
         root,

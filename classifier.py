@@ -1,5 +1,7 @@
 from pathlib import PurePosixPath
 
+from i18n import tr
+
 
 # 明确属于文档、安装辅助或构建工具的文件。
 # 缺失这些文件通常不会直接影响插件在 MSFS 中运行。
@@ -102,20 +104,20 @@ def classify_file_path(file_path):
     if clean_file_name in LIKELY_NON_RUNTIME_FILES:
         return {
             "impact": "likely_non_runtime",
-            "reason": "看起来属于说明文件、构建工具或打包辅助文件"
+            "reason": tr("classify.docs.build_tool")
         }
 
     # 说明文档类扩展名或文档目录。
     if extension in DOCUMENTATION_EXTENSIONS:
         return {
             "impact": "likely_non_runtime",
-            "reason": "扩展名表明它可能是说明文档"
+            "reason": tr("classify.docs.extension")
         }
 
     if path_parts & NON_RUNTIME_DIR_PARTS:
         return {
             "impact": "likely_non_runtime",
-            "reason": "位于说明文档目录中"
+            "reason": tr("classify.docs.directory")
         }
 
     # 部分 WASM 相关资源使用复合扩展名，
@@ -124,21 +126,21 @@ def classify_file_path(file_path):
     if ".wasm." in file_name:
         return {
             "impact": "potentially_runtime",
-            "reason": "文件名表明它与 WASM 模块相关"
+            "reason": tr("classify.wasm.composite")
         }
 
     # 常见 MSFS / 插件运行资源。
     if extension in POTENTIALLY_RUNTIME_EXTENSIONS:
         return {
             "impact": "potentially_runtime",
-            "reason": f"{extension} 文件可能参与模拟器或插件运行"
+            "reason": tr("classify.ext.runtime", extension=extension)
         }
 
     # 标准运行时结构目录（SimObjects / effects / html_ui 等）。
     if path_parts & RUNTIME_DIR_PARTS:
         return {
             "impact": "potentially_runtime",
-            "reason": "文件位于插件的运行时结构目录中"
+            "reason": tr("classify.dir.runtime")
         }
 
     # 不能简单认为 .txt 都是说明文档。
@@ -150,13 +152,13 @@ def classify_file_path(file_path):
     ):
         return {
             "impact": "potentially_runtime",
-            "reason": "文件位于配置目录中，可能参与插件运行"
+            "reason": tr("classify.config.runtime")
         }
 
     # 没有充分依据时保持 unknown，宁可不判，也不要乱判。
     return {
         "impact": "unknown",
-        "reason": "目前没有足够信息判断该文件是否影响运行"
+        "reason": tr("classify.unknown")
     }
 
 
