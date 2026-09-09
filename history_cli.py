@@ -3,12 +3,10 @@
 import argparse
 import json
 import sys
-import time
 from pathlib import Path
 
 from history import HistoryError, HistoryStore, build_snapshot, compare_snapshots
-from main import run_scan
-from relationships import analyze_relationships
+from main import run_full_diagnosis
 from report import build_report
 
 
@@ -16,15 +14,27 @@ def _print_json(document):
     print(json.dumps(document, ensure_ascii=False, indent=2))
 
 
-def _run_report(community_path, mode):
-    addons, scan_errors, issues, stats, timing = run_scan(
-        community_path, full_scan=(mode == "full")
+def _compare_summary(comparison):
+    """把基线比较文档浓缩成一行人类可读摘要。"""
+    summary = comparison.get("summary", {})
+    section_counts = []
+    for section, counts in summary.get("sections", {}).items():
+        total = sum(counts.values())
+        if total:
+            section_counts.append(f"{section} {total} 项")
+    detail = "、".join(section_counts) if section_counts else "无差异"
+    return (
+        f"基线比较 {comparison.get('baseline_name', '')}: "
+        f"共 {summary.get('total_changes', 0)} 项变化"
+        f"（{detail}）；兼容性提示 "
+        f"{summary.get('compatibility_warnings', 0)} 条"
     )
-    started = time.perf_counter()
-    relationships = analyze_relationships(addons)
-    elapsed = time.perf_counter() - started
-    timing["relationships"] = elapsed
-    timing["total"] += elapsed
+
+
+def _run_report(community_path, mode):
+    addons, scan_errors, issues, stats, relationships, timing = (
+        run_full_diagnosis(community_path, full_scan=(mode == "full"))
+    )
     return build_report(
         community_path=community_path,
         scan_mode=mode,
@@ -101,6 +111,8 @@ def main(argv=None):
         else:
             raise AssertionError(f"未处理的命令：{args.command}")
         _print_json(result)
+        if args.command == "compare":
+            print(_compare_summary(result), file=sys.stderr)
         return 0
     except HistoryError as error:
         print(f"历史操作失败：{error}", file=sys.stderr)

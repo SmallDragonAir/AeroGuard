@@ -1,6 +1,7 @@
 import os
 import time
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
@@ -8,6 +9,11 @@ from pathlib import Path
 # 终端 / 文本展示时每条 issue 明细最多显示多少项。
 # issue["details"] 始终保存完整列表，供分类器与 JSON 报告使用。
 DETAILS_PREVIEW_LIMIT = 10
+
+# 完整扫描时，插件数达到该值才启用跨包并行建索引；
+# 小 Community 直接串行，避免线程调度开销。
+PARALLEL_MIN_ADDONS = 8
+MAX_PARALLEL_WORKERS = 8
 
 
 # 操作系统或文件管理器自动生成的杂物文件。
@@ -21,11 +27,18 @@ OS_JUNK_BASENAMES = {
 
 @dataclass
 class AnalyzerStats:
-    """Analyzer 内部各阶段耗时统计（秒），供性能分析使用。"""
+    """Analyzer 内部各阶段耗时统计（秒），供性能分析使用。
+
+    tree_walk_time: 各插件文件树遍历耗时之和（并行时按线程累计，
+        可能大于墙钟时间）。
+    tree_walk_wall_time: 文件树遍历阶段实际经过的墙钟时间；
+        未执行文件树遍历时为 0。
+    """
 
     layout_parse_time: float = 0.0
     declared_check_time: float = 0.0
     tree_walk_time: float = 0.0
+    tree_walk_wall_time: float = 0.0
     addon_count: int = 0
     package_timings: list = field(default_factory=list)
 
@@ -218,8 +231,29 @@ def _path_covered_by_scan_error(normalized_path, scan_errors):
     return False
 
 
+def _build_index_for_addon(addon):
+    """为单个插件建立文件索引，返回耗时与读取错误。
 
-def analyze_community_with_stats(addons, full_scan=False):
+    供完整扫描的跨包并行阶段使用；普通目录遍历是 I/O 密集，
+    对大量插件并发枚举可显著缩短总体耗时。
+    """
+    package_root = Path(addon["path"])
+    start_time = time.perf_counter()
+
+    file_index_errors = []
+    file_index = build_file_index(package_root, file_index_errors)
+
+    elapsed = time.perf_counter() - start_time
+    return {
+        "package": addon["folder_name"],
+        "index": file_index,
+        "errors": file_index_errors,
+        "elapsed": elapsed,
+    }
+
+
+
+def analyze_community_with_stats(addons, full_scan=False, workers=None):
     """
     分析 scanner 返回的插件列表，并生成一致性问题列表。
 
@@ -234,6 +268,11 @@ def analyze_community_with_stats(addons, full_scan=False):
     full_scan=True:
         在快速扫描基础上，进一步检查实际文件是否缺失、
         文件大小是否与 layout.json 一致，以及是否存在未登记文件。
+        文件索引建立阶段在插件较多时会跨包并发（I/O 密集），
+        输出与串行执行完全一致。
+
+    workers: 建索引阶段的并发控制。None 表示自动；1 强制串行；
+        大于 1 使用指定线程数（受 MAX_PARALLEL_WORKERS 约束）。
     """
 
     layout_parse_time = 0.0
@@ -242,6 +281,35 @@ def analyze_community_with_stats(addons, full_scan=False):
     package_timings = []
 
     issues = []
+
+    # === 完整扫描：预先并行建立各插件的文件索引 ===
+    # 建索引是纯 I/O 密集的文件树枚举，是完整扫描的主要耗时来源。
+    # 在插件较多时并发枚举多个插件目录，可显著缩短总耗时；
+    # 结果与串行执行逐字一致，本阶段只做缓存、不做判断。
+    index_results = {}
+    tree_walk_wall_time = 0.0
+    if full_scan:
+        candidates = [
+            addon for addon in addons
+            if (Path(addon["path"]) / "layout.json").exists()
+        ]
+        use_parallel = (
+            (workers is not None and workers > 1)
+            or (workers is None and len(candidates) >= PARALLEL_MIN_ADDONS)
+        )
+        prebuild_start = time.perf_counter()
+        if use_parallel:
+            max_workers = min(len(candidates), MAX_PARALLEL_WORKERS)
+            if workers is not None:
+                max_workers = min(max_workers, workers)
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                for result in pool.map(_build_index_for_addon, candidates):
+                    index_results[result["package"]] = result
+        else:
+            for candidate in candidates:
+                result = _build_index_for_addon(candidate)
+                index_results[result["package"]] = result
+        tree_walk_wall_time = time.perf_counter() - prebuild_start
 
     for addon in addons:
 
@@ -404,18 +472,18 @@ def analyze_community_with_stats(addons, full_scan=False):
         size_mismatches = []
         unlisted_files = []
 
+        # === 完整扫描：使用预建的实际文件索引 ===
 
-        package_root = Path(addon["path"])
+        index_result = index_results.get(addon["folder_name"])
 
+        if index_result is None:
+            # 预建阶段的筛选条件与这里完全一致（layout.json 存在），
+            # 正常不会走到；此处兜底现场建立以保证行为完整。
+            index_result = _build_index_for_addon(addon)
 
-        # === 完整扫描：建立实际文件索引 ===
-
-        tree_start = time.perf_counter()
-
-        file_index_errors = []
-        file_index = build_file_index(package_root, file_index_errors)
-
-        package_tree_time = time.perf_counter() - tree_start
+        file_index = index_result["index"]
+        file_index_errors = index_result["errors"]
+        package_tree_time = index_result["elapsed"]
         tree_walk_time += package_tree_time
         package_timings.append({
             "package": addon["folder_name"],
@@ -528,6 +596,7 @@ def analyze_community_with_stats(addons, full_scan=False):
         layout_parse_time=layout_parse_time,
         declared_check_time=declared_check_time,
         tree_walk_time=tree_walk_time,
+        tree_walk_wall_time=tree_walk_wall_time,
         addon_count=len(addons),
         package_timings=sorted(
             package_timings,

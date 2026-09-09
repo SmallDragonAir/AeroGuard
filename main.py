@@ -72,6 +72,11 @@ def parse_args(argv):
             "不写 PATH 时自动保存到 reports/ 目录"
         ),
     )
+    parser.add_argument(
+        "--no-relationships",
+        action="store_true",
+        help="跳过跨 Package 冲突/依赖分析（快速扫描可明显提速）",
+    )
     return parser.parse_args(argv)
 
 
@@ -267,7 +272,14 @@ def print_text_report(*, community_path, scan_mode, addons, scan_errors,
         print("  Analyzer 内部：")
         print("    Layout 解析：", round(stats.layout_parse_time, 2), "秒")
         print("    声明文件检查：", round(stats.declared_check_time, 2), "秒")
-        print("    文件树遍历：", round(stats.tree_walk_time, 2), "秒")
+        if stats.tree_walk_wall_time:
+            print(
+                "    文件树遍历（线程累计 / 墙钟）：",
+                round(stats.tree_walk_time, 2), "秒 /",
+                round(stats.tree_walk_wall_time, 2), "秒",
+            )
+        else:
+            print("    文件树遍历：", round(stats.tree_walk_time, 2), "秒")
         if stats.package_timings:
             print("  文件树遍历热点 TOP 5：")
             for item in stats.package_timings[:5]:
@@ -298,7 +310,11 @@ def save_json_report(document, requested_path):
 
 
 def run_scan(community_path, full_scan):
-    """执行扫描-分析-分类三段流程，返回各阶段产物与计时。"""
+    """执行扫描-分析-降噪-分类流程，返回各阶段产物与计时。
+
+    跨 Package 关系分析不在本函数内执行，由 run_full_diagnosis
+    （CLI / GUI / 历史记录共用）统一负责并计时。
+    """
     timing = {}
 
     start_time = time.perf_counter()
@@ -326,11 +342,43 @@ def run_scan(community_path, full_scan):
     return addons, scan_errors, issues, stats, timing
 
 
+def run_full_diagnosis(community_path, full_scan, *, with_relationships=True):
+    """完整诊断流程：run_scan +（可选）跨 Package 关系分析。
+
+    返回 (addons, scan_errors, issues, stats, relationships, timing)。
+    relationships 在 with_relationships=False 时为 None（跳过分析以
+    缩短快速扫描耗时）。供 CLI（main.main）、桌面界面
+    （gui.run_desktop_scan）与历史记录（history_cli._run_report）共用。
+    """
+    addons, scan_errors, issues, stats, timing = run_scan(
+        community_path, full_scan=full_scan
+    )
+
+    if not with_relationships:
+        return addons, scan_errors, issues, stats, None, timing
+
+    relationships_start = time.perf_counter()
+    relationships = analyze_relationships(addons)
+    timing["relationships"] = time.perf_counter() - relationships_start
+    timing["total"] += timing["relationships"]
+
+    return addons, scan_errors, issues, stats, relationships, timing
+
+
 def main(argv=None):
     _reconfigure_stdout()
 
     args = parse_args(argv)
-    community_path, mode = collect_input(args)
+
+    try:
+        community_path, mode = collect_input(args)
+    except EOFError:
+        print(
+            "没有可用的交互输入（标准输入已关闭）；请使用非交互参数：\n"
+            "  python main.py <Community 路径> --mode quick|full [--json]",
+            file=sys.stderr,
+        )
+        return 2
 
     if not community_path.exists():
         print("路径不存在，请检查输入的路径是否正确。")
@@ -340,15 +388,13 @@ def main(argv=None):
         print("输入的路径不是一个目录。")
         return 1
 
-    addons, scan_errors, issues, stats, timing = run_scan(
-        community_path, full_scan=(mode == "full")
+    addons, scan_errors, issues, stats, relationships, timing = (
+        run_full_diagnosis(
+            community_path,
+            full_scan=(mode == "full"),
+            with_relationships=not args.no_relationships,
+        )
     )
-
-    relationships_start = time.perf_counter()
-    relationships = analyze_relationships(addons)
-    relationships_time = time.perf_counter() - relationships_start
-    timing["relationships"] = relationships_time
-    timing["total"] += relationships_time
 
     print_text_report(
         community_path=community_path,

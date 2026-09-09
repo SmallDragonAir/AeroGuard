@@ -45,6 +45,7 @@ AeroGuard 是一个正在开发中的开源 MSFS 插件诊断工具，用于检�
 - 使用原生桌面界面执行后台扫描、浏览详情、导出报告和管理插件
 - 保存紧凑扫描历史，建立命名环境基线并比较插件、问题、冲突与依赖变化
 - 自动忽略 Thumbs.db / .DS_Store 等系统杂物文件
+- 本地已知结论记录（按插件 / 规则记录人工结论，已知异常数据库雏形）
 
 `main.py` 的扫描流程始终只读。`manage.py` 只在用户运行明确的管理子命令时
 移动或安装指定包；默认把状态、禁用包和备份存入 Community 同级的
@@ -165,8 +166,10 @@ AeroGuard/
 
 负责运行确定性的插件一致性检测规则。`details` 中始终保存完整明细，
 `preview` 提供终端展示用的截断视图；耗时统计通过返回值提供，
-不再直接打印到标准输出。完整扫描还会记录每个已建立索引插件的
-遍历耗时与文件数，用于定位大型目录热点。
+不再直接打印到标准输出。完整扫描会为每个插件建立文件索引：插件较多时
+文件树枚举跨包并发（纯 I/O，输出与串行逐字一致），并记录每个插件的
+遍历耗时与文件数，用于定位大型目录热点。热点目录密集型插件（例如
+带数万个子目录的机场地景）是遍历耗时主要来源。
 
 ### `classifier.py`
 
@@ -232,6 +235,7 @@ Patch Hint 只在同一机场代码候选中作为意图信号，避免把互不
 扫描、安装检查和管理操作在后台线程执行，完整扫描期间窗口仍可响应。界面提供
 问题、冲突与依赖、插件管理、扫描异常、历史与基线五个页签，双击表格行可查看
 完整 JSON 数据。Profile 会先执行 dry-run 并显示移动数与警告数，再允许应用。
+后台任务运行期间关闭窗口会先请求确认，避免中断正在进行的安装或回滚。
 
 ### `history.py` / `history_cli.py`
 
@@ -309,6 +313,12 @@ AeroGuard 目前属于早期实验性项目。
 - [ ] 插件仓库 / Hub
 - [ ] 安装与更新管理
 
+> 以上 5 项都依赖联网服务或外部数据源，开发前需满足安全原则中的
+> 来源与授权要求。实现层面的前置分析与本地可落地子集规划见
+> [`docs/roadmap-online-services.md`](docs/roadmap-online-services.md)。
+> 「已知异常数据库」的纯本地雏形已可用：`manage.py note-*` 按
+> 插件 / 规则记录与查询人工结论（数据存于 `.aeroguard/notes/`）。
+
 ---
 
 ## ▶️ 运行
@@ -339,6 +349,9 @@ python main.py D:\MSFS2024_DATA\Community --mode full --json
 
 # 指定 JSON 输出路径
 python main.py D:\MSFS2024_DATA\Community --mode quick --json reports\scan.json
+
+# 只关心文件一致性、需要快速迭代时跳过关系分析（可快约 3 倍）
+python main.py D:\MSFS2024_DATA\Community --mode quick --no-relationships
 ```
 
 插件管理命令会修改指定 Community，请先退出模拟器；完成后需要重新启动模拟器
@@ -366,6 +379,11 @@ python manage.py D:\MSFS2024_DATA\Community profile-apply flying
 python manage.py D:\MSFS2024_DATA\Community check D:\Downloads\addon.zip
 python manage.py D:\MSFS2024_DATA\Community install D:\Downloads\addon.zip
 python manage.py D:\MSFS2024_DATA\Community rollback TRANSACTION_ID
+
+# 本地已知结论记录（已知异常数据库的纯本地雏形，不联网）
+python manage.py D:\MSFS2024_DATA\Community note-add PACKAGE --text "该差异由运行期自更新导致，可忽略" --rule LAYOUT_FILE_SIZE_MISMATCH
+python manage.py D:\MSFS2024_DATA\Community note-list [PACKAGE]
+python manage.py D:\MSFS2024_DATA\Community note-remove NOTE_ID
 ```
 
 需要改用其他状态目录时，把 `--state-dir PATH` 放在 Community 路径之后、
@@ -385,6 +403,10 @@ python history_cli.py D:\MSFS2024_DATA\Community baseline-set stable --snapshot 
 python history_cli.py D:\MSFS2024_DATA\Community compare stable --mode full --record
 ```
 
+`compare` 的完整差异以 JSON 输出到标准输出；同时在标准错误打印一行
+人类可读摘要（如 `共 3 项变化（packages 1 项、issues 2 项）`），
+方便交互使用时快速确认，脚本解析 JSON 不受影响。
+
 基线与当前扫描应使用相同模式；不同模式仍可比较，但结果会明确标记兼容性提示。
 
 运行自动化测试（需要合成 fixture，不需要真实 Community）：
@@ -394,6 +416,34 @@ python -m unittest discover
 ```
 
 > 开发期的一次性调试脚本位于 `tools/dev/`，不属于产品代码。
+
+### JSON 报告结构
+
+`--json` 生成的报告是面向程序消费的稳定文档（`schema_version: 1`），顶层字段：
+
+```text
+schema_version  报告结构版本（目前为 1）
+tool            "aeroguard"
+generated_at    UTC 时间戳
+community_path  被扫描的 Community 路径
+scan_mode       "quick" | "full"
+summary         插件数 / 问题数 / 扫描错误数 / 冲突数 / 降噪统计
+timing          各阶段耗时与 Analyzer 内部耗时 / 热点统计
+rule_summary    按规则聚合（rule_id、插件数、受影响项目数）
+scan_errors     顶层为 scanner 发现的问题（如 manifest 无法解析）；
+                完整扫描中无法读取的文件树路径会以
+                FILE_TREE_SCAN_INCOMPLETE 规则出现在问题明细中
+addons          插件精简信息（不含原始 manifest）
+issues_by_package  按插件分组的完整问题明细
+relationships   资源冲突 / 机场重复 / 依赖分析（analyze_relationships.as_dict）；
+                使用 --no-relationships 跳过时为 null
+```
+
+每条 issue 统一包含：`rule_id`、`severity`、`package`、`message`、
+`affected_count`、`details`（完整明细）与 `preview`（展示用截断视图）；
+被降噪的 issue 额外带有 `original_severity`、`downgrade_rule`、
+`downgrade_reason` 与 `downgrade_evidence`，分类后的文件级 issue 带有
+`impact` 与 `classified_files`。
 
 ---
 

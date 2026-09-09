@@ -5,16 +5,14 @@ import json
 import queue
 import sys
 import threading
-import time
 import tkinter as tk
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from main import run_scan, save_json_report
+from main import run_full_diagnosis, save_json_report
 from history import HistoryError, HistoryStore
 from management import AddonManager, ManagementError
-from relationships import analyze_relationships
 from report import build_report
 
 
@@ -46,21 +44,16 @@ class DesktopScanResult:
 
 
 def run_desktop_scan(community_path, mode):
-    """运行一次供 GUI 使用的完整诊断流程。"""
+    """运行一次供 GUI 使用的完整诊断流程（与 CLI 共用同一实现）。"""
     path = Path(community_path).expanduser().resolve()
     if not path.is_dir():
         raise ValueError(f"Community 路径不存在或不是目录：{path}")
     if mode not in {"quick", "full"}:
         raise ValueError(f"不支持的扫描模式：{mode}")
 
-    addons, scan_errors, issues, stats, timing = run_scan(
-        path, full_scan=(mode == "full")
+    addons, scan_errors, issues, stats, relationships, timing = (
+        run_full_diagnosis(path, full_scan=(mode == "full"))
     )
-    relationship_start = time.perf_counter()
-    relationships = analyze_relationships(addons)
-    relationship_time = time.perf_counter() - relationship_start
-    timing["relationships"] = relationship_time
-    timing["total"] += relationship_time
     return DesktopScanResult(
         community_path=path,
         mode=mode,
@@ -209,6 +202,7 @@ class AeroGuardApp:
         self.root.geometry("1280x800")
         self.root.minsize(980, 640)
         self.root.option_add("*Font", "{Segoe UI} 10")
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         style = ttk.Style(self.root)
         for theme in ("vista", "clam"):
             if theme in style.theme_names():
@@ -426,6 +420,19 @@ class AeroGuardApp:
 
     def _history_store(self):
         return HistoryStore(self._community_path(), self.state_dir)
+
+    def _on_close(self):
+        """关闭窗口前确认：后台任务（如安装/回滚）仍在运行时先询问。"""
+        if self._busy:
+            confirmed = messagebox.askokcancel(
+                "AeroGuard",
+                "后台任务仍在运行，现在退出可能中断正在进行的操作。"
+                "确定要退出吗？",
+                parent=self.root,
+            )
+            if not confirmed:
+                return
+        self.root.destroy()
 
     def _run_async(self, label, task, on_success):
         if self._busy:
