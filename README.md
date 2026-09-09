@@ -1,5 +1,528 @@
 # AeroGuard
 
+> Local, explainable add-on diagnostics & environment health checks for **Microsoft Flight Simulator**.
+
+AeroGuard is an open-source MSFS add-on diagnostics tool (in development) that inspects the structure, metadata, and file consistency of add-on packages under your Community folder, and reports potential issues in the most explainable way possible.
+
+The project is still in its early development phase. The current focus is on building reliable, deterministic local scanning and analysis.
+
+> ⚠️ AeroGuard flagging an anomaly does not mean the add-on actually fails at runtime.
+
+---
+
+## ✈️ What AeroGuard does
+
+The current version scans add-ons in an MSFS Community folder and checks:
+
+- `manifest.json` metadata
+- Whether `layout.json` exists
+- Whether `layout.json` parses correctly
+- Whether `layout.json` contains invalid entries
+- Whether `layout.json` contains duplicate paths
+- Whether declared files actually exist
+- Whether actual file sizes match `layout.json`
+- Whether the add-on folder contains files not declared in `layout.json`
+- Aggregating findings per add-on
+- Counting findings per rule
+- Ranking add-ons by number of findings
+- A priority-review ranking
+- Classifying missing / size-mismatched / unlisted files by potential runtime impact
+- Quick scan / full scan
+- Optional JSON report output (full details, machine-readable)
+- Non-interactive CLI usage with command-line arguments
+- Marking a scan as incomplete when parts of the file tree cannot be read (instead of falsely reporting missing files)
+- Recording traversal time per indexed add-on in full scans, with hot-spot rankings in the terminal and JSON
+- Recognizing CRLF → LF line-ending normalization through stratified sampling of large size-mismatch batches, then transparently downgrading them
+- Detecting resource-override candidates where multiple packages declare the same VFS-relative path
+- Recognizing intentional overrides via Package Order Hints, dependency declarations, and global override declarations
+- Identifying airport-duplication candidates using multiple signals from package name, title, and layout paths
+- Analyzing dependencies within the current scan root, out-of-scope dependencies, and dependency cycles
+- Explicitly enabling / disabling Community packages and saving repeatable Profiles
+- Moving suspicious packages into a quarantine area outside the Community and restoring them to their prior state
+- Path-safety, structure, and file-consistency checks for folder or ZIP install sources
+- Keeping transactional backups when installing or replacing add-ons, with safe rollback
+- Listing enabled, disabled, quarantined, backed-up, and rolled-back versions
+- A native desktop UI for background scans, browsing details, exporting reports, and management
+- Compact scan history with named environment baselines and diffs of add-ons, findings, conflicts, and dependencies
+- Ignoring OS/file-manager junk such as Thumbs.db / .DS_Store
+- Local knowledge records (manual notes per add-on / rule — a local seed of a known-issue database)
+
+`main.py`'s scan flow is always read-only. `manage.py` only moves or installs explicitly named packages when you run a management sub-command; by default it stores state, disabled packages, and backups in `.aeroguard/` next to the Community, and never touches `Official*`, `UserCfg.opt`, or the simulator's `Content.xml`.
+
+---
+
+## 🛡️ Design principles
+
+AeroGuard tries to keep the following concepts distinct.
+
+### Finding (检测事实)
+
+Objective facts the scanner can establish.
+
+Example:
+
+```text
+layout.json declares a file, but that file does not exist in the add-on folder.
+```
+
+### Severity
+
+How obvious the package's internal inconsistency is.
+
+Current values:
+
+```text
+ERROR
+WARNING
+INFO
+```
+
+### Impact (potential runtime impact)
+
+Whether an anomaly might affect the add-on at runtime in MSFS.
+
+Current values:
+
+```text
+POTENTIALLY_RUNTIME
+LIKELY_NON_RUNTIME
+UNKNOWN
+```
+
+Where:
+
+- `POTENTIALLY_RUNTIME`: may involve actual runtime assets
+- `LIKELY_NON_RUNTIME`: more likely documentation, build tools, or install helpers
+- `UNKNOWN`: current rules cannot judge reliably
+
+AeroGuard will not declare that an add-on developer shipped broken software based only on local scan results.
+
+For example, AeroGuard prefers reporting:
+
+> The installed add-on content differs from its own metadata.
+
+rather than:
+
+> This add-on is broken.
+
+---
+
+## 🔍 Scan modes
+
+### Quick scan
+
+Checks mainly:
+
+- `manifest.json`
+- `layout.json`
+- Layout data structure
+- Duplicate paths
+- Invalid entries
+
+A quick scan does not walk the whole add-on file tree. Good for routine checks.
+
+### Full scan
+
+Everything in the quick scan, plus:
+
+- Missing files
+- File-size mismatches
+- Unlisted files
+
+For Communities with many add-ons or many small files, a full scan may take a while.
+
+---
+
+## 🧠 Architecture
+
+```text
+AeroGuard/
+├── main.py        # CLI entry: interactive / args / JSON reports
+├── scanner.py     # Discovers add-on packages and reads manifest metadata
+├── analyzer.py    # Runs deterministic consistency rules (issues + perf stats)
+├── classifier.py  # Classifies file-level findings by potential runtime impact
+├── noise.py       # Reduces high-confidence scan noise with verifiable sampling
+├── relationships.py # VFS resource conflicts, airports, and dependency analysis
+├── report.py      # Pure data aggregation and JSON report document building
+├── management.py  # Enable/disable, Profiles, quarantine, install checks, rollback
+├── manage.py      # Add-on management CLI
+├── history.py     # Compact scan history, environment baselines, and diffs
+├── history_cli.py # History / baseline CLI
+├── gui.py         # Native Tk desktop UI and background-task coordination
+├── AeroGuard.pyw  # Console-less Windows launch entry
+├── launcher.py    # Single-file launcher dispatching GUI and the three CLIs
+├── i18n.py        # Lightweight i18n (zh / en catalogs and language resolution)
+├── tests/         # Automated tests (stdlib unittest, synthetic fixtures)
+└── tools/dev/     # One-off dev/debug scripts (not product code)
+```
+
+### `scanner.py`
+
+Discovers add-on packages and reads basic metadata, keeping the original manifest for later features.
+
+### `analyzer.py`
+
+Runs the deterministic consistency rules. `details` always keeps the full item list while `preview` provides a truncated view for terminal display; timing statistics are returned instead of printed to stdout. Full scans build a file index per add-on; with many add-ons the tree enumeration runs across packages concurrently (pure I/O — output is byte-identical to serial), and each add-on's traversal time and file count are recorded to locate large-directory hot spots. Directory-heavy add-ons (e.g. airport scenery with tens of thousands of subdirectories) dominate traversal time.
+
+### `classifier.py`
+
+Classifies missing, size-mismatched, and unlisted files one by one by potential runtime impact, based on path, extension, and directory semantics.
+
+### `noise.py`
+
+Conservative automatic noise reduction. It only considers size-mismatch batches of at least 20 items and selects up to 64 representative samples across top-level directories and extensions. Only when every sample's size difference exactly matches CRLF→LF line-ending normalization is the finding downgraded from WARNING to INFO; the original severity, rule, and sampling evidence remain in the JSON report.
+
+### `report.py`
+
+Display-independent pure aggregation (per-rule statistics, rankings, per-add-on risk, etc.) and construction of the serializable JSON report document.
+
+### `relationships.py`
+
+Cross-package analysis within the current scan root. Resource path overlaps are graded by VFS directory, declared size, and override intent. Intentional resource-level overrides are accepted only via explicit dependency or global-override declarations; Patch Hints are used only as an intent signal among candidates for the same airport code, so unrelated packages are not paired merely because their order groups are adjacent. A default-preferred package is inferred only when all owners share the same Package Order Hint, and is explicitly labeled "default order only", since in-sim package ordering can still be changed.
+
+Airport identification is a conservative heuristic: an airport identifier must be supported by two independent sources — the package name or title, and the layout paths. `airport_code` includes ICAO codes as well as local codes such as `5Z5`, `FVM`. It does not parse BGL internals, so "not identified" does not mean "airport absent"; results should still be confirmed with DevMode VFS/airport tools.
+
+Dependency analysis resolves only packages inside the current scan root. Dependencies not found there are marked `outside_scan_scope`, because they may live in Official, Community2024, or streaming package sources — they are not reported as "missing dependencies".
+
+### `main.py`
+
+The current command-line development/test entry: argument parsing, running the scan pipeline, and presenting text / JSON results.
+
+### `management.py` / `manage.py`
+
+The manager only operates on the Community root given on the command line. Disabling moves the whole package folder into the management state directory; enabling moves it back. Moves require both directories to be on the same disk so a cross-drive copy is never mistaken for an atomic switch. A Profile records the enabled state of packages known at save time; applying it does not change packages added later that are not in the Profile. When disabling or applying a Profile, transactions keep dependency warnings if an add-on that stays enabled explicitly depends on a package being moved out. Directories with a missing or unparseable manifest appear in the inventory but are never written into a Profile automatically.
+
+An install source may be a package folder, a folder of packages, or a ZIP. The manager rejects ZIP path traversal, duplicate paths, symlinks, encrypted entries, and archives over safety limits; it then runs the full consistency check on a staged copy. Sources containing `.exe`, `.dll`, `.bat`, `.cmd`, `.msi`, or `.ps1` require an explicit `--allow-executables`; AeroGuard still never runs those files.
+
+Before replacing an existing package, the original directory is saved under `backups/` by transaction ID. Rollback does not delete the new version; it moves it to `rolled-back/`. If the new version's `manifest.json` or `layout.json` changed after installation, rollback stops to avoid overwriting unknown state. All backups are kept; there is currently no automatic cleanup. Version fields are shown verbatim from the manifest; version ordering is never inferred.
+
+### `gui.py` / `AeroGuard.pyw`
+
+The native desktop UI uses Tk 8.6 bundled with Python 3.12 — no third-party GUI dependency. Scans, install checks, and management operations run on background threads, so the window stays responsive during full scans. The UI offers five tabs: Issues, Conflicts & Dependencies, Add-on Management, Scan Errors, and History & Baselines; double-click a row to view the full JSON data. Profiles are dry-run first and show move/warning counts before applying. Closing the window while a background task is running asks for confirmation first, to avoid interrupting an install or rollback.
+
+### `history.py` / `history_cli.py`
+
+History snapshots do not copy tens of thousands of file details from a full report; they store package versions, aggregated findings, scan errors, resource/airport conflicts, dependency state, and evidence digests. Baseline diffs report added, removed, and changed items separately, and warn when the scan mode or Community path differs. History and baselines are written under `.aeroguard/history/`; an existing named baseline is only updated with `--replace`.
+
+---
+
+## 🚧 Current development status
+
+AeroGuard is an early-stage experimental project.
+
+The CLI is currently used mainly for:
+
+- Developing the scan engine
+- Validating detection rules
+- Collecting real add-on samples
+- Calibrating false positives
+- Testing anomaly-classification logic
+- Performance analysis
+- Experimenting with rollback-safe local add-on management under explicit commands
+
+You are currently advised **not** to delete, modify, or reinstall add-ons based purely on AeroGuard scan results.
+
+---
+
+## 🗺️ Roadmap
+
+### Phase 1: Package diagnostics
+
+- [x] Community add-on discovery
+- [x] Manifest parsing
+- [x] Layout parsing
+- [x] Missing-file detection
+- [x] File-size anomaly detection
+- [x] Unlisted-file detection
+- [x] Invalid Layout entry detection
+- [x] Duplicate Layout path detection
+- [x] Basic impact classifier
+- [x] Per-add-on aggregation of results
+- [x] Ranking by finding count
+- [x] Priority-review ranking
+- [x] Improved impact classifier (missing / size / unlisted, full details + directory semantics)
+- [x] Better result representation (uniform detail structure, JSON reports, CLI args, scan-error details)
+- [x] Performance analysis & optimization (per-add-on hot spots, skip redundant realpath on plain dirs)
+- [x] Automated tests (`python -m unittest discover`)
+- [x] Lower false-positive rate (high-confidence line-ending normalization with transparent downgrade)
+
+### Phase 2: Add-on conflict detection
+
+- [x] Package resource conflict detection (VFS-relative path index)
+- [x] Airport duplication / conflict detection (multi-signal conservative ICAO / local-code recognition)
+- [x] Recognizing intentional overrides (dependencies, Patch Hints, global override declarations)
+- [x] Conflict severity classification (scope, declared size, override intent)
+- [x] Add-on dependency analysis (in-root resolution, out-of-scope marking, dependency cycles)
+
+### Phase 3: Add-on management
+
+- [x] Enable / disable add-ons (same-disk moves outside the Community)
+- [x] Configuration Profiles (packages added later and not in the Profile stay untouched)
+- [x] Safe quarantine (records reason and previous enabled state)
+- [x] Pre-install checks (folder / ZIP, safe paths, full consistency scan)
+- [x] Install rollback (transactional backups, change protection, rolled-back versions kept)
+- [x] Add-on version management (current locations, backups, and rollback history listings)
+
+### Later
+
+- [x] Native desktop GUI (Tk, background scans, details, export, management)
+- [x] Scan history & environment baselines (compact snapshots, named baselines, structured diffs)
+- [ ] Optional online rule library
+- [ ] Known-issue database
+- [ ] Trusted-publisher system
+- [ ] Add-on repository / Hub
+- [ ] Install & update management
+
+> All five unchecked items depend on online services or external data sources and must meet the source/authorization requirements in the safety section first. Implementation analysis and local-first sub-scope planning are in
+> [`docs/roadmap-online-services.md`](docs/roadmap-online-services.md).
+> A pure-local seed of the known-issue database is already usable: `manage.py note-*` records and queries manual notes per add-on / rule (stored in `.aeroguard/notes/`).
+
+---
+
+## ▶️ Running
+
+Development environment:
+
+- Windows
+- Python 3.12
+
+Run:
+
+```powershell
+# Native desktop UI
+python gui.py D:\MSFS2024_DATA\Community --mode quick
+
+# Console-less Windows entry; AeroGuard.pyw can also be double-clicked
+pythonw AeroGuard.pyw D:\MSFS2024_DATA\Community
+
+# Interactive: enter the Community path, then choose 1 = quick / 2 = full
+python main.py
+
+# Non-interactive
+python main.py D:\MSFS2024_DATA\Community --mode quick
+python main.py D:\MSFS2024_DATA\Community --mode full
+
+# Full scan with JSON report (saved under reports/ automatically)
+python main.py D:\MSFS2024_DATA\Community --mode full --json
+
+# Explicit JSON output path
+python main.py D:\MSFS2024_DATA\Community --mode quick --json reports\scan.json
+
+# Skip relationship analysis when iterating fast (~3x faster)
+python main.py D:\MSFS2024_DATA\Community --mode quick --no-relationships
+```
+
+Management commands modify the given Community — quit the simulator first, and restart it afterwards for stable package mounting. `PACKAGE` below is the package folder name inside the Community:
+
+```powershell
+# Read-only inventory & version archive
+python manage.py D:\MSFS2024_DATA\Community inventory
+python manage.py D:\MSFS2024_DATA\Community versions
+
+# Enable / disable / quarantine
+python manage.py D:\MSFS2024_DATA\Community disable PACKAGE
+python manage.py D:\MSFS2024_DATA\Community enable PACKAGE
+python manage.py D:\MSFS2024_DATA\Community quarantine PACKAGE --reason "pending conflict review"
+python manage.py D:\MSFS2024_DATA\Community restore PACKAGE
+
+# Save, dry-run, and apply a Profile
+python manage.py D:\MSFS2024_DATA\Community profile-save flying
+# overwrite an existing Profile explicitly
+python manage.py D:\MSFS2024_DATA\Community profile-save flying --replace
+python manage.py D:\MSFS2024_DATA\Community profile-apply flying --dry-run
+python manage.py D:\MSFS2024_DATA\Community profile-apply flying
+
+# Read-only install check, install, and rollback by transaction ID
+python manage.py D:\MSFS2024_DATA\Community check D:\Downloads\addon.zip
+python manage.py D:\MSFS2024_DATA\Community install D:\Downloads\addon.zip
+python manage.py D:\MSFS2024_DATA\Community rollback TRANSACTION_ID
+
+# Local knowledge records (offline seed of the known-issue database)
+python manage.py D:\MSFS2024_DATA\Community note-add PACKAGE --text "differs due to runtime self-update; safe to ignore" --rule LAYOUT_FILE_SIZE_MISMATCH
+python manage.py D:\MSFS2024_DATA\Community note-list [PACKAGE]
+python manage.py D:\MSFS2024_DATA\Community note-remove NOTE_ID
+```
+
+To use another state directory, put `--state-dir PATH` after the Community path and before the sub-command. The state directory must be outside the Community and on the same disk.
+
+Scan history and environment baselines:
+
+```powershell
+# Scan and save a compact history snapshot
+python history_cli.py D:\MSFS2024_DATA\Community record --mode full --label "before SU4"
+
+# List history; set a snapshot as the named baseline
+python history_cli.py D:\MSFS2024_DATA\Community list
+python history_cli.py D:\MSFS2024_DATA\Community baseline-set stable --snapshot SNAPSHOT_ID
+
+# Re-scan, compare, and save the current snapshot
+python history_cli.py D:\MSFS2024_DATA\Community compare stable --mode full --record
+```
+
+`compare` writes the full diff as JSON to stdout, and a one-line human-readable summary to stderr (e.g. `3 changes (packages 1, issues 2)`) so scripts can parse the JSON unchanged.
+
+Baselines and current scans should use the same mode; different modes can still be compared, but the result will clearly flag a compatibility note.
+
+Run automated tests (synthetic fixtures — no real Community needed):
+
+```powershell
+python -m unittest discover
+```
+
+> One-off dev/debug scripts live in `tools/dev/` and are not product code.
+
+### Packaging (Windows executable)
+
+By default PyInstaller produces a **single file** `AeroGuard.exe` containing the desktop UI and all CLIs (the `launcher.py` dispatcher picks the mode by invocation):
+
+```powershell
+python -m pip install --user pyinstaller
+powershell -ExecutionPolicy Bypass -File tools\build_exe.ps1
+```
+
+Artifact `dist\AeroGuard.exe` (console subsystem, ~12 MB):
+
+```text
+double-click / no args         launch the desktop UI (auto-hides its console)
+AeroGuard.exe scan <path> ...   scan / JSON report CLI (same args as python main.py)
+AeroGuard.exe manage <path> ... management CLI (same args as python manage.py)
+AeroGuard.exe history <path> .. history / baseline CLI (same args as python history_cli.py)
+AeroGuard.exe --help            usage
+```
+
+Add `-All` to also build separate standalone exes `aeroguard.exe`, `aeroguard-manage.exe`, `aeroguard-history.exe`.
+
+> A single-file exe unpacks itself on first launch, so startup is a little slower. The artifact has no network behavior; runtime data is still written to `.aeroguard/` next to the Community. If your antivirus deletes a freshly built exe, add `dist/` to the exclusions and rebuild.
+
+### Language (中文 / English)
+
+Language resolution order: `--lang` (GUI only) → environment variable `AEROGUARD_LANG` (e.g. `en`, `zh`) → OS UI language (Chinese systems default to Chinese, otherwise English).
+
+```powershell
+# GUI in English
+python gui.py D:\MSFS2024_DATA\Community --lang en
+# or the packaged exe
+AeroGuard.exe gui --lang en
+
+# The env var works for the CLIs too (scan/relationship/classification text switches)
+set AEROGUARD_LANG=en
+python main.py D:\MSFS2024_DATA\Community --mode quick
+```
+
+Covered: all GUI chrome and detection-rule messages, classification reasons, noise-reduction notes, and conflict/dependency explanations. The desktop UI header has a "Language / 语言" dropdown for **instant switching** between 中文 / English (disabled while a background task is running); already-loaded explanation text keeps the language it was generated in, and re-scanning regenerates it in the current language. Note: operation error messages in `manage.py` / `history_cli.py` and the structural headings of CLI text reports are currently Chinese-only (a later increment).
+
+### JSON report structure
+
+Reports generated by `--json` are stable, machine-readable documents (`schema_version: 1`). Top-level fields:
+
+```text
+schema_version  structure version (currently 1)
+tool            "aeroguard"
+generated_at    UTC timestamp
+community_path  scanned Community path
+scan_mode       "quick" | "full"
+summary         add-on / issue / scan-error / conflict counts and noise-reduction stats
+timing          per-stage timings incl. Analyzer internals / hot spots
+rule_summary    per-rule aggregation (rule_id, add-on count, affected item count)
+scan_errors     top-level scanner problems (e.g. unparseable manifest);
+                unreadable tree paths in full scans appear as
+                FILE_TREE_SCAN_INCOMPLETE findings
+addons          brief add-on info (raw manifests excluded)
+issues_by_package   full findings grouped per add-on
+relationships   resource conflicts / airport duplicates / dependency analysis
+                (analyze_relationships.as_dict); null when --no-relationships is used
+```
+
+Every finding carries: `rule_id`, `severity`, `package`, `message`, `affected_count`, `details` (full items) and `preview` (truncated display view). Noise-reduced findings additionally include `original_severity`, `downgrade_rule`, `downgrade_reason`, and `downgrade_evidence`; classified file-level findings include `impact` and `classified_files`.
+
+---
+
+## ⚠️ About scan results
+
+AeroGuard's primary check is:
+
+> Consistency between the add-on's actual file state and its own metadata.
+
+An anomaly therefore does not necessarily mean the add-on cannot run. Some add-ons may:
+
+- Generate files after installation
+- Modify files at runtime
+- Change resources with their own updater
+- Keep an outdated `layout.json`
+- Ship development or packaging tools
+- Ship documentation that never runs
+- Use runtime-generated data
+
+AeroGuard tries to account for these cases, but its classification rules are still evolving.
+
+---
+
+## 🔐 Safety principles
+
+AeroGuard's scanner follows:
+
+> When read-only is possible, never execute.
+
+During scans and management it never runs third-party code from add-ons:
+
+- `.exe`
+- `.bat`
+- `.cmd`
+- `.dll`
+- other executables or scripts
+
+If third-party diagnostics integration is added later, it must also require:
+
+1. A clear, trusted source
+2. A precise program whitelist
+3. File integrity verification
+4. Explicit user authorization
+
+---
+
+## 🤝 Testing help
+
+The most valuable contributions right now:
+
+- Submitting scan results for different add-ons
+- Cross-checking with legit, clean installs
+- Reporting false positives
+- Providing unusual Package-structure samples
+- Suggesting detection-rule ideas
+- Submitting code improvements
+
+When reporting an add-on anomaly, please include:
+
+- MSFS version
+- Add-on version
+- Add-on source
+- Whether it was modified
+- Whether it is a clean install
+- The AeroGuard findings
+- Whether an actual runtime anomaly occurs in MSFS
+
+---
+
+## 📄 Open-source license
+
+AeroGuard is released under the GNU General Public License v3.0 (GPL-3.0).
+
+You are free to use, study, modify, and redistribute AeroGuard. If you modify AeroGuard, or combine it into a GPL-covered derivative/combined work and distribute it, you must provide the corresponding source under the same freedoms per GPL requirements.
+
+See the `LICENSE` file in this repository.
+
+---
+
+## Disclaimer
+
+AeroGuard is an independent community project with no official affiliation or partnership with Microsoft, Asobo Studio, or any third-party add-on developer.
+
+Microsoft Flight Simulator and related trademarks belong to their respective owners.
+
+---
+
+# 简体中文
+
 > 面向 Microsoft Flight Simulator 的本地插件诊断与环境健康检查工具。
 
 AeroGuard 是一个正在开发中的开源 MSFS 插件诊断工具，用于检查 Community 文件夹中的插件包结构、元数据和文件一致性，并以尽可能可解释的方式报告潜在问题。
