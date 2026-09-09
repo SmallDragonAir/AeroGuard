@@ -27,3 +27,4 @@ Thumbs.db
 # AeroGuard local output
 reports/
 cache/
+.aeroguard/
