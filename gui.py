@@ -6,6 +6,7 @@ import queue
 import sys
 import threading
 import tkinter as tk
+import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -19,6 +20,7 @@ from i18n import (
 )
 from verify import verify_package
 from export import export_html, export_markdown
+from update import check_for_update
 from main import run_diagnosis_with_context, save_json_report
 from history import HistoryError, HistoryStore
 from management import AddonManager, ManagementError
@@ -367,6 +369,10 @@ class AeroGuardApp:
         )
         self.lang_box.grid(row=2, column=7, padx=(0, 4))
         self.lang_box.bind("<<ComboboxSelected>>", self._on_language_change)
+        ttk.Button(
+            frame, text=tr("gui.action.check_update"),
+            command=self._check_update,
+        ).grid(row=2, column=8, padx=(12, 0))
         frame.columnconfigure(1, weight=1)
 
     def _build_summary(self):
@@ -1235,6 +1241,49 @@ class AeroGuardApp:
             tr("gui.status.rollback_running", tid=transaction_id),
             lambda: manager.rollback_install(transaction_id),
             self._receive_management_action,
+        )
+
+    def _check_update(self):
+        """显式检查 AeroGuard 自身更新（唯一联网操作，只读、不下载）。"""
+
+        def receive(result):
+            latest = result["latest_version"]
+            current = result["current_version"]
+            if not result.get("version_comparable", True):
+                self.status_var.set(tr(
+                    "report.update.uncomparable", tag=result.get("tag", "")
+                ))
+                messagebox.showinfo(
+                    tr("gui.detail.update"),
+                    tr("report.update.uncomparable", tag=result.get("tag", "")),
+                    parent=self.root,
+                )
+                self._show_json_detail(tr("gui.detail.update"), result)
+                return
+            if result["update_available"]:
+                self.status_var.set(tr(
+                    "report.update.available", latest=latest, current=current
+                ))
+                open_page = messagebox.askyesno(
+                    tr("gui.detail.update"),
+                    tr("gui.update.available", latest=latest, current=current),
+                    parent=self.root,
+                )
+                if open_page:
+                    webbrowser.open(result["release_url"])
+            else:
+                self.status_var.set(tr(
+                    "report.update.up_to_date", version=current
+                ))
+                messagebox.showinfo(
+                    tr("gui.detail.update"),
+                    tr("gui.update.up_to_date", version=current),
+                    parent=self.root,
+                )
+            self._show_json_detail(tr("gui.detail.update"), result)
+
+        self._run_async(
+            tr("gui.status.checking_update"), check_for_update, receive
         )
 
     def _verify_selected(self):

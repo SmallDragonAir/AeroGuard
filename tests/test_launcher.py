@@ -37,6 +37,10 @@ class LauncherSelectTest(unittest.TestCase):
         for head in ("-h", "--help", "help"):
             self.assertEqual(select_command([head]), ("help", []))
 
+    def test_check_update_routes(self):
+        self.assertEqual(select_command(["check-update"]), ("update", []))
+        self.assertEqual(select_command(["update"]), ("update", []))
+
     def test_unknown_first_arg_falls_back_to_gui_with_args(self):
         # 兼容直接传路径的用法：AeroGuard.exe D:\Community --mode quick
         self.assertEqual(

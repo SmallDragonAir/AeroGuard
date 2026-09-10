@@ -51,8 +51,9 @@ The current version scans add-ons in an MSFS Community folder and checks:
 - Rule overrides: ignore or downgrade a rule for a specific add-on, surfaced in reports and the GUI
 - Single add-on check: `manage verify PACKAGE` (or the GUI button) runs a read-only consistency check on one installed package
 - Report export in JSON, Markdown, or standalone HTML — the Markdown/HTML reports include per-rule handling guidance
+- Update check: an explicit, read-only check of the latest AeroGuard release (the only network operation; nothing is downloaded or replaced)
 
-`main.py`'s scan flow is always read-only. `manage.py` only moves or installs explicitly named packages when you run a management sub-command; by default it stores state, disabled packages, and backups in `.aeroguard/` next to the Community, and never touches `Official*`, `UserCfg.opt`, or the simulator's `Content.xml`.
+`main.py`'s scan flow is always read-only. `manage.py` only moves or installs explicitly named packages when you run a management sub-command; by default it stores state, disabled packages, and backups in `.aeroguard/` next to the Community, and never touches `Official*`, `UserCfg.opt`, or the simulator's `Content.xml`. The only network access is the explicit update check.
 
 ---
 
@@ -317,6 +318,9 @@ python main.py D:\MSFS2024_DATA\Community --mode quick --json reports\scan.json
 python main.py D:\MSFS2024_DATA\Community --mode full --markdown
 python main.py D:\MSFS2024_DATA\Community --mode full --html reports\scan.html
 
+# Check for a newer AeroGuard release (read-only, nothing is downloaded)
+python main.py --check-update
+
 # Skip relationship analysis when iterating fast (~3x faster)
 python main.py D:\MSFS2024_DATA\Community --mode quick --no-relationships
 ```
@@ -409,7 +413,7 @@ AeroGuard.exe --help            usage
 
 Add `-All` to also build separate standalone exes `aeroguard.exe`, `aeroguard-manage.exe`, `aeroguard-history.exe`.
 
-> A single-file exe unpacks itself on first launch, so startup is a little slower. The artifact has no network behavior; runtime data is still written to `.aeroguard/` next to the Community. If your antivirus deletes a freshly built exe, add `dist/` to the exclusions and rebuild.
+> A single-file exe unpacks itself on first launch, so startup is a little slower. Apart from the explicit update check (`--check-update` / the GUI button), the artifact has no network behavior; runtime data is still written to `.aeroguard/` next to the Community. If your antivirus deletes a freshly built exe, add `dist/` to the exclusions and rebuild.
 
 ### Language (中文 / English)
 
@@ -589,10 +593,12 @@ AeroGuard 是一个正在开发中的开源 MSFS 插件诊断工具，用于检�
 - 规则覆盖：可按（插件, 规则）忽略或降级扫描结果，并在报告与界面中体现
 - 单插件快速校验：`manage verify 包名`（或 GUI 按钮）只读检查单个已安装插件
 - 报告导出：JSON、Markdown 或独立 HTML；Markdown/HTML 报告附带逐条处理建议
+- 检查更新：显式、只读地查询 AeroGuard 最新发布（唯一联网操作，不下载不替换）
 
 `main.py` 的扫描流程始终只读。`manage.py` 只在用户运行明确的管理子命令时
 移动或安装指定包；默认把状态、禁用包和备份存入 Community 同级的
 `.aeroguard/`，不修改 `Official*`、`UserCfg.opt` 或模拟器的 `Content.xml`。
+唯一的网络访问是显式的"检查更新"。
 
 ---
 
@@ -901,6 +907,9 @@ python main.py D:\MSFS2024_DATA\Community --mode quick --json reports\scan.json
 python main.py D:\MSFS2024_DATA\Community --mode full --markdown
 python main.py D:\MSFS2024_DATA\Community --mode full --html reports\scan.html
 
+# 检查 AeroGuard 是否有新版本（只读，不下载任何文件）
+python main.py --check-update
+
 # 只关心文件一致性、需要快速迭代时跳过关系分析（可快约 3 倍）
 python main.py D:\MSFS2024_DATA\Community --mode quick --no-relationships
 ```
@@ -999,7 +1008,8 @@ AeroGuard.exe --help             查看用法
 需要沿用独立 exe 时加 `-All`：会额外生成 `aeroguard.exe`、
 `aeroguard-manage.exe`、`aeroguard-history.exe`。
 
-> 单文件 exe 首次启动需要自解压，稍慢属正常现象；产物不含网络行为，
+> 单文件 exe 首次启动需要自解压，稍慢属正常现象；除显式"检查更新"
+> （`--check-update` / GUI 按钮）外，产物不含网络行为，
 > 运行时数据仍写入 Community 同级的 `.aeroguard/`。若本机安全软件
 > 误删新构建的 exe，请把 `dist/` 加入排除项后重新构建。
 

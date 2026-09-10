@@ -118,6 +118,16 @@ _register("gui.action.install_zip", "安装 ZIP", "Install ZIP")
 _register("gui.action.install_dir", "安装目录", "Install folder")
 _register("gui.action.rollback_install", "回滚安装", "Rollback install")
 _register("gui.action.verify", "检查选中插件", "Verify selected add-on")
+_register("gui.action.check_update", "检查更新", "Check for updates")
+_register("gui.status.checking_update", "正在检查更新…",
+          "Checking for updates...")
+_register("gui.detail.update", "更新检查", "Update check")
+_register("gui.update.available",
+          "发现新版本 {latest}（当前 {current}）。要打开发布页吗？",
+          "New version {latest} is available (current {current}). "
+          "Open the release page?")
+_register("gui.update.up_to_date", "已是最新版本（{version}）。",
+          "You are on the latest version ({version}).")
 _register("gui.action.refresh_history", "刷新历史", "Refresh history")
 _register("gui.action.record_snapshot", "记录当前结果", "Record current result")
 _register("gui.action.set_baseline", "设为基线", "Set as baseline")
@@ -497,6 +507,26 @@ _register("report.markdown_saved", "\nMarkdown 报告已保存：{path}",
           "\nMarkdown report saved: {path}")
 _register("report.html_saved", "\nHTML 报告已保存：{path}",
           "\nHTML report saved: {path}")
+_register("report.update.current", "当前版本：{version}",
+          "Current version: {version}")
+_register("report.update.latest", "最新版本：{version}",
+          "Latest version: {version}")
+_register("report.update.available",
+          "发现新版本：{latest}（当前 {current}）",
+          "New version available: {latest} (current {current})")
+_register("report.update.up_to_date", "已是最新版本（{version}）。",
+          "You are on the latest version ({version}).")
+_register("report.update.uncomparable",
+          "无法从更新信息比较版本（服务端标签：{tag}），请查看发布页确认。",
+          "Could not compare versions from the update info (server tag: "
+          "{tag}); please check the release page.")
+_register("report.update.release_url", "发布页：{url}", "Release page: {url}")
+_register("report.update.no_download",
+          "AeroGuard 不会自动下载或替换文件，请自行决定更新方式。",
+          "AeroGuard never downloads or replaces files automatically; "
+          "choose how to update yourself.")
+_register("cli.update_failed", "检查更新失败：{error}",
+          "Update check failed: {error}")
 _register("report.path_missing", "路径不存在，请检查输入的路径是否正确。",
           "Path does not exist; please check the entered path.")
 _register("report.path_not_dir", "输入的路径不是一个目录。",
@@ -519,6 +549,7 @@ _register("launcher.usage", """AeroGuard —— MSFS 插件诊断与管理（单
   AeroGuard.exe scan <Community> [--mode quick|full] [--json] [--no-relationships]
   AeroGuard.exe manage <Community> <子命令> ...
   AeroGuard.exe history <Community> <子命令> ...
+  AeroGuard.exe check-update            检查更新（唯一联网操作，只读）
 
 提示：也可以直接运行 python main.py / manage.py / history_cli.py。""",
           """AeroGuard - MSFS add-on diagnostics & management (single file)
@@ -529,6 +560,7 @@ Usage:
   AeroGuard.exe scan <Community> [--mode quick|full] [--json] [--no-relationships]
   AeroGuard.exe manage <Community> <command> ...
   AeroGuard.exe history <Community> <command> ...
+  AeroGuard.exe check-update           check for updates (only network op, read-only)
 
 Tip: you can also run python main.py / manage.py / history_cli.py directly.""")
 
@@ -561,6 +593,10 @@ _register("help.main.html",
           "同时导出 HTML 报告（含逐条处理建议）；不写 PATH 时保存到 reports/",
           "Also export an HTML report with per-rule guidance; without PATH "
           "it is saved under reports/")
+_register("help.main.check_update",
+          "检查 AeroGuard 自身是否有新版本后退出（唯一联网操作，只读）",
+          "Check for a newer AeroGuard release and exit (the only network "
+          "operation; read-only)")
 _register("help.main.epilog",
           "示例：\n"
           "  python main.py\n"
@@ -848,6 +884,14 @@ _MESSAGE_TEMPLATES = (
      "Failed to parse the add-on manifest.json: {error}"),
     (r"插件 manifest\.json 顶层必须是 JSON 对象",
      "The add-on manifest.json must be a JSON object"),
+    # --- 检查更新 ---
+    (r"无法连接更新服务：(?P<error>.+)",
+     "Cannot reach the update service: {error}"),
+    (r"检查更新失败：(?P<error>.+)", "Update check failed: {error}"),
+    (r"更新服务返回的内容不是 JSON 对象",
+     "The update service did not return a JSON object"),
+    (r"更新服务返回的版本标签无效",
+     "The update service returned an invalid version tag"),
     # --- 历史 / 基线 ---
     (r"报告必须是 JSON 对象", "The report must be a JSON object"),
     (r"基线和当前快照必须是 JSON 对象",

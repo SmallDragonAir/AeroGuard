@@ -28,6 +28,8 @@ COMMAND_TARGETS = {
     "scan": "scan",
     "manage": "manage",
     "history": "history",
+    "check-update": "update",
+    "update": "update",
 }
 
 USAGE = """\
@@ -110,6 +112,9 @@ def main(argv=None):
 
     if target == "history":
         return history_cli.main(remainder)
+
+    if target == "update":
+        return scan_cli.main(["--check-update"])
 
     raise AssertionError(f"未处理的目标：{target}")
 

@@ -23,6 +23,7 @@ from noise import apply_noise_rules
 from relationships import analyze_relationships
 from i18n import localize_text, tr
 from export import export_html, export_markdown
+from update import UpdateError, check_for_update
 from notes import NoteStore, NoteStoreError
 from overrides import OverrideStore, OverrideStoreError
 from knowledge import apply_known_context
@@ -92,7 +93,40 @@ def parse_args(argv):
         metavar="PATH",
         help=tr("help.main.html"),
     )
+    parser.add_argument(
+        "--check-update",
+        action="store_true",
+        help=tr("help.main.check_update"),
+    )
     return parser.parse_args(argv)
+
+
+def run_update_check():
+    """检查 AeroGuard 自身更新并打印结果（唯一联网操作，只读）。"""
+    try:
+        result = check_for_update()
+    except UpdateError as error:
+        print(
+            tr("cli.update_failed", error=localize_text(str(error))),
+            file=sys.stderr,
+        )
+        return 2
+
+    print(tr("report.update.current", version=result["current_version"]))
+    print(tr("report.update.latest", version=result["latest_version"]))
+    if not result.get("version_comparable", True):
+        print(tr("report.update.uncomparable", tag=result.get("tag", "")))
+    elif result["update_available"]:
+        print(tr(
+            "report.update.available",
+            latest=result["latest_version"],
+            current=result["current_version"],
+        ))
+    else:
+        print(tr("report.update.up_to_date", version=result["current_version"]))
+    print(tr("report.update.release_url", url=result["release_url"]))
+    print(tr("report.update.no_download"))
+    return 0
 
 
 def collect_input(args):
@@ -475,6 +509,9 @@ def main(argv=None):
     _reconfigure_stdout()
 
     args = parse_args(argv)
+
+    if getattr(args, "check_update", False):
+        return run_update_check()
 
     try:
         community_path, mode = collect_input(args)
