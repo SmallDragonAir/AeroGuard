@@ -22,6 +22,7 @@ from classifier import classify_issues
 from noise import apply_noise_rules
 from relationships import analyze_relationships
 from i18n import localize_text, tr
+from export import export_html, export_markdown
 from notes import NoteStore, NoteStoreError
 from overrides import OverrideStore, OverrideStoreError
 from knowledge import apply_known_context
@@ -76,6 +77,20 @@ def parse_args(argv):
     parser.add_argument(
         "--state-dir",
         help=tr("help.main.state_dir"),
+    )
+    parser.add_argument(
+        "--markdown",
+        nargs="?",
+        const="",
+        metavar="PATH",
+        help=tr("help.main.markdown"),
+    )
+    parser.add_argument(
+        "--html",
+        nargs="?",
+        const="",
+        metavar="PATH",
+        help=tr("help.main.html"),
     )
     return parser.parse_args(argv)
 
@@ -343,6 +358,24 @@ def save_json_report(document, requested_path):
     return output_path
 
 
+def save_text_report(text, requested_path, extension):
+    """把文本报告写入文件（.md / .html），返回写入路径。"""
+    if requested_path == "":
+        default_name = (
+            "aeroguard_"
+            f"{datetime.now().strftime('%Y%m%d_%H%M%S')}{extension}"
+        )
+        output_path = Path("reports") / default_name
+    else:
+        output_path = Path(requested_path)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as file:
+        file.write(text)
+
+    return output_path
+
+
 def run_scan(community_path, full_scan):
     """执行扫描-分析-降噪-分类流程，返回各阶段产物与计时。
 
@@ -477,7 +510,8 @@ def main(argv=None):
         relationships=relationships,
     )
 
-    if args.json is not None:
+    if (args.json is not None or args.markdown is not None
+            or args.html is not None):
         document = build_report(
             community_path=community_path,
             scan_mode=mode,
@@ -488,8 +522,19 @@ def main(argv=None):
             timing=timing,
             relationships=relationships,
         )
-        output_path = save_json_report(document, args.json)
-        print(tr("report.json_saved", path=output_path))
+        if args.json is not None:
+            output_path = save_json_report(document, args.json)
+            print(tr("report.json_saved", path=output_path))
+        if args.markdown is not None:
+            output_path = save_text_report(
+                export_markdown(document), args.markdown, ".md"
+            )
+            print(tr("report.markdown_saved", path=output_path))
+        if args.html is not None:
+            output_path = save_text_report(
+                export_html(document), args.html, ".html"
+            )
+            print(tr("report.html_saved", path=output_path))
 
     return 0
 

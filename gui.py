@@ -18,6 +18,7 @@ from i18n import (
     tr,
 )
 from verify import verify_package
+from export import export_html, export_markdown
 from main import run_diagnosis_with_context, save_json_report
 from history import HistoryError, HistoryStore
 from management import AddonManager, ManagementError
@@ -837,12 +838,26 @@ class AeroGuardApp:
         filename = filedialog.asksaveasfilename(
             title=tr("gui.export.title"),
             defaultextension=".json",
-            filetypes=(("JSON", "*.json"), (tr("gui.export.all_files"), "*.*")),
+            filetypes=(
+                ("JSON", "*.json"),
+                (tr("gui.export.markdown"), "*.md"),
+                (tr("gui.export.html"), "*.html"),
+                (tr("gui.export.all_files"), "*.*"),
+            ),
         )
         if not filename:
             return
-        output = save_json_report(self.result.report_document(), filename)
-        self.status_var.set(tr("gui.status.json_saved", path=output))
+        document = self.result.report_document()
+        suffix = Path(filename).suffix.casefold()
+        if suffix in {".md", ".markdown"}:
+            output = Path(filename)
+            output.write_text(export_markdown(document), encoding="utf-8")
+        elif suffix in {".html", ".htm"}:
+            output = Path(filename)
+            output.write_text(export_html(document), encoding="utf-8")
+        else:
+            output = save_json_report(document, filename)
+        self.status_var.set(tr("gui.status.report_saved", path=output))
 
     def _refresh_inventory(self):
         try:

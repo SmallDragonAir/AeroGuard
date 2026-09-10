@@ -137,6 +137,10 @@ _register("gui.status.verify_done",
 _register("gui.export.title", "导出 AeroGuard JSON 报告",
           "Export AeroGuard JSON report")
 _register("gui.export.all_files", "所有文件", "All files")
+_register("gui.export.markdown", "Markdown 报告", "Markdown report")
+_register("gui.export.html", "HTML 报告", "HTML report")
+_register("gui.status.report_saved", "报告已保存：{path}",
+          "Report saved: {path}")
 
 _register("gui.err.choose_community", "请先选择 Community 路径",
           "Choose a Community path first")
@@ -489,6 +493,10 @@ _register("report.perf_hotspot_line", "    {package}：{seconds:.2f} 秒 / {file
           "    {package}: {seconds:.2f} s / {files} file(s)")
 _register("report.json_saved", "\nJSON 报告已保存：{path}",
           "\nJSON report saved: {path}")
+_register("report.markdown_saved", "\nMarkdown 报告已保存：{path}",
+          "\nMarkdown report saved: {path}")
+_register("report.html_saved", "\nHTML 报告已保存：{path}",
+          "\nHTML report saved: {path}")
 _register("report.path_missing", "路径不存在，请检查输入的路径是否正确。",
           "Path does not exist; please check the entered path.")
 _register("report.path_not_dir", "输入的路径不是一个目录。",
@@ -545,6 +553,14 @@ _register("help.main.state_dir",
           "知识状态目录；缺省使用 Community 同级的 .aeroguard",
           "Knowledge state directory; defaults to .aeroguard next to the "
           "Community")
+_register("help.main.markdown",
+          "同时导出 Markdown 报告（含逐条处理建议）；不写 PATH 时保存到 reports/",
+          "Also export a Markdown report with per-rule guidance; without "
+          "PATH it is saved under reports/")
+_register("help.main.html",
+          "同时导出 HTML 报告（含逐条处理建议）；不写 PATH 时保存到 reports/",
+          "Also export an HTML report with per-rule guidance; without PATH "
+          "it is saved under reports/")
 _register("help.main.epilog",
           "示例：\n"
           "  python main.py\n"
