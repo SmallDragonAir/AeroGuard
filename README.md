@@ -48,6 +48,7 @@ The current version scans add-ons in an MSFS Community folder and checks:
 - Compact scan history with named environment baselines and diffs of add-ons, findings, conflicts, and dependencies
 - Ignoring OS/file-manager junk such as Thumbs.db / .DS_Store
 - Local knowledge records (manual notes per add-on / rule — a local seed of a known-issue database)
+- Rule overrides: ignore or downgrade a rule for a specific add-on, surfaced in reports and the GUI
 
 `main.py`'s scan flow is always read-only. `manage.py` only moves or installs explicitly named packages when you run a management sub-command; by default it stores state, disabled packages, and backups in `.aeroguard/` next to the Community, and never touches `Official*`, `UserCfg.opt`, or the simulator's `Content.xml`.
 
@@ -343,6 +344,11 @@ python manage.py D:\MSFS2024_DATA\Community rollback TRANSACTION_ID
 python manage.py D:\MSFS2024_DATA\Community note-add PACKAGE --text "differs due to runtime self-update; safe to ignore" --rule LAYOUT_FILE_SIZE_MISMATCH
 python manage.py D:\MSFS2024_DATA\Community note-list [PACKAGE]
 python manage.py D:\MSFS2024_DATA\Community note-remove NOTE_ID
+
+# Rule overrides: ignore / downgrade a rule for a specific add-on
+python manage.py D:\MSFS2024_DATA\Community override-add PACKAGE --rule RULE_ID --action ignore|downgrade [--reason "why"]
+python manage.py D:\MSFS2024_DATA\Community override-list [PACKAGE]
+python manage.py D:\MSFS2024_DATA\Community override-remove OVERRIDE_ID
 ```
 
 To use another state directory, put `--state-dir PATH` after the Community path and before the sub-command. The state directory must be outside the Community and on the same disk.
@@ -411,7 +417,7 @@ set AEROGUARD_LANG=en
 python main.py D:\MSFS2024_DATA\Community --mode quick
 ```
 
-Covered: all GUI chrome and detection-rule messages, classification reasons, noise-reduction notes, and conflict/dependency explanations. The desktop UI header has a "Language / 语言" dropdown for **instant switching** between 中文 / English (disabled while a background task is running); already-loaded explanation text keeps the language it was generated in, and re-scanning regenerates it in the current language. Note: operation error messages in `manage.py` / `history_cli.py` and the structural headings of CLI text reports are currently Chinese-only (a later increment).
+Covered: everything user-facing — GUI chrome, detection-rule messages, classification reasons, noise-reduction notes, conflict/dependency explanations, CLI text reports, operation error messages (management / history / notes / overrides) via boundary localization, and every CLI `--help` / argument description. The desktop UI header has a "Language / 语言" dropdown for **instant switching** between 中文 / English (disabled while a background task is running). Loaded results were generated in the language active at scan time; when you switch language, the UI asks whether to re-scan immediately so that messages/reasons also appear in the new language — declining keeps the previous-language text until a later re-scan.
 
 ### JSON report structure
 
@@ -435,7 +441,7 @@ relationships   resource conflicts / airport duplicates / dependency analysis
                 (analyze_relationships.as_dict); null when --no-relationships is used
 ```
 
-Every finding carries: `rule_id`, `severity`, `package`, `message`, `affected_count`, `details` (full items) and `preview` (truncated display view). Noise-reduced findings additionally include `original_severity`, `downgrade_rule`, `downgrade_reason`, and `downgrade_evidence`; classified file-level findings include `impact` and `classified_files`.
+Every finding carries: `rule_id`, `severity`, `package`, `message`, `affected_count`, `details` (full items) and `preview` (truncated display view). Noise-reduced findings additionally include `original_severity`, `downgrade_rule`, `downgrade_reason`, and `downgrade_evidence`; classified file-level findings include `impact` and `classified_files`. Findings with a matching local note include `notes`, and downgraded-by-override findings include `override`.
 
 ---
 
@@ -571,6 +577,7 @@ AeroGuard 是一个正在开发中的开源 MSFS 插件诊断工具，用于检�
 - 保存紧凑扫描历史，建立命名环境基线并比较插件、问题、冲突与依赖变化
 - 自动忽略 Thumbs.db / .DS_Store 等系统杂物文件
 - 本地已知结论记录（按插件 / 规则记录人工结论，已知异常数据库雏形）
+- 规则覆盖：可按（插件, 规则）忽略或降级扫描结果，并在报告与界面中体现
 
 `main.py` 的扫描流程始终只读。`manage.py` 只在用户运行明确的管理子命令时
 移动或安装指定包；默认把状态、禁用包和备份存入 Community 同级的
@@ -911,6 +918,11 @@ python manage.py D:\MSFS2024_DATA\Community rollback TRANSACTION_ID
 python manage.py D:\MSFS2024_DATA\Community note-add PACKAGE --text "该差异由运行期自更新导致，可忽略" --rule LAYOUT_FILE_SIZE_MISMATCH
 python manage.py D:\MSFS2024_DATA\Community note-list [PACKAGE]
 python manage.py D:\MSFS2024_DATA\Community note-remove NOTE_ID
+
+# 规则覆盖：对某插件的某条规则忽略或降级
+python manage.py D:\MSFS2024_DATA\Community override-add PACKAGE --rule RULE_ID --action ignore|downgrade [--reason "原因"]
+python manage.py D:\MSFS2024_DATA\Community override-list [PACKAGE]
+python manage.py D:\MSFS2024_DATA\Community override-remove OVERRIDE_ID
 ```
 
 需要改用其他状态目录时，把 `--state-dir PATH` 放在 Community 路径之后、
@@ -987,12 +999,14 @@ set AEROGUARD_LANG=en
 python main.py D:\MSFS2024_DATA\Community --mode quick
 ```
 
-已覆盖：GUI 全部界面文案与检测规则消息、分类理由、降噪与冲突/依赖说明。
+已覆盖全部用户可见文案：GUI 全部界面文案、检测规则消息、分类理由、
+降噪与冲突/依赖说明、
+CLI 文本报告，以及管理 / 历史 / 结论 / 覆盖等操作错误消息（边界本地化），
+各 CLI 的 `--help` 与参数说明。
 桌面界面头部提供「语言 / Language」下拉框，可在 中文 / English 之间
-**即时切换**（后台任务运行期间暂不可切换）；已加载结果的说明文案保持
-生成时的语言，重新扫描后会按当前语言生成。
-说明：`manage.py` / `history_cli.py` 的操作错误消息、CLI 报告的结构性
-栏目文字目前仍为中文，属后续增量。
+**即时切换**（后台任务运行期间暂不可切换）。检测说明（message / reason）
+是在扫描时按当时语言生成的；切换语言时界面会询问是否**立即重新扫描**，
+让说明显示为新语言——选择“否”则保留原语言，之后重扫即切换。
 
 ### JSON 报告结构
 
@@ -1020,7 +1034,8 @@ relationships   资源冲突 / 机场重复 / 依赖分析（analyze_relationshi
 `affected_count`、`details`（完整明细）与 `preview`（展示用截断视图）；
 被降噪的 issue 额外带有 `original_severity`、`downgrade_rule`、
 `downgrade_reason` 与 `downgrade_evidence`，分类后的文件级 issue 带有
-`impact` 与 `classified_files`。
+`impact` 与 `classified_files`。命中本地已知结论的 issue 携带 `notes`，
+被规则覆盖降级的 issue 携带 `override`。
 
 ---
 
