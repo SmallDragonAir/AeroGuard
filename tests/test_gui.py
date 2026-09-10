@@ -5,6 +5,7 @@ from pathlib import Path
 from gui import (
     conflict_table_rows,
     diagnostic_summary,
+    export_document,
     filter_rows,
     issue_row_tag,
     issue_table_rows,
@@ -179,6 +180,48 @@ class GuiDataTest(unittest.TestCase):
         self.assertEqual(_lang_code_from_display("English"), "en")
         # 恢复默认，避免影响同进程内后续用例
         set_language("zh")
+
+
+class ExportDocumentTest(unittest.TestCase):
+    """GUI 导出对话框使用的按扩展名分派逻辑。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.document = {
+            "schema_version": 1,
+            "community_path": "C:/Community",
+            "scan_mode": "quick",
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "summary": {},
+            "rule_summary": [],
+            "scan_errors": [],
+            "addons": [],
+            "issues_by_package": {},
+            "relationships": None,
+            "timing": {},
+        }
+
+    def test_markdown_extension(self):
+        target = self.root / "report.md"
+        output = export_document(self.document, str(target))
+        self.assertEqual(Path(output), target)
+        self.assertIn("# AeroGuard report", target.read_text(encoding="utf-8"))
+
+    def test_html_extension(self):
+        target = self.root / "report.html"
+        export_document(self.document, str(target))
+        self.assertIn(
+            "<!DOCTYPE html>", target.read_text(encoding="utf-8")
+        )
+
+    def test_default_is_json(self):
+        target = self.root / "report.json"
+        export_document(self.document, str(target))
+        self.assertTrue(
+            target.read_text(encoding="utf-8").lstrip().startswith("{")
+        )
 
 
 if __name__ == "__main__":

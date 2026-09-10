@@ -60,7 +60,7 @@ _register("gui.lang.declined_note",
           "until you re-scan.")
 _register("gui.button.browse", "浏览…", "Browse...")
 _register("gui.button.start_scan", "开始扫描", "Start scan")
-_register("gui.button.export_json", "导出 JSON", "Export JSON")
+_register("gui.button.export_json", "导出报告", "Export report")
 _register("gui.prompt.choose_community", "选择 Community 文件夹",
           "Select the Community folder")
 _register("gui.status.choose_first",
@@ -134,8 +134,8 @@ _register("gui.status.verifying", "正在校验 {package}…",
 _register("gui.status.verify_done",
           "{package}：ERROR {error} / WARNING {warning} / INFO {info}",
           "{package}: ERROR {error} / WARNING {warning} / INFO {info}")
-_register("gui.export.title", "导出 AeroGuard JSON 报告",
-          "Export AeroGuard JSON report")
+_register("gui.export.title", "导出 AeroGuard 报告（JSON / Markdown / HTML）",
+          "Export AeroGuard report (JSON / Markdown / HTML)")
 _register("gui.export.all_files", "所有文件", "All files")
 _register("gui.export.markdown", "Markdown 报告", "Markdown report")
 _register("gui.export.html", "HTML 报告", "HTML report")

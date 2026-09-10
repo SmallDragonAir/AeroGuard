@@ -87,6 +87,19 @@ def run_desktop_scan(community_path, mode, state_dir=None):
     )
 
 
+def export_document(document, filename):
+    """按扩展名把报告文档写为 JSON / Markdown / HTML，返回写入路径。"""
+    path = Path(filename)
+    suffix = path.suffix.casefold()
+    if suffix in {".md", ".markdown"}:
+        path.write_text(export_markdown(document), encoding="utf-8")
+        return path
+    if suffix in {".html", ".htm"}:
+        path.write_text(export_html(document), encoding="utf-8")
+        return path
+    return save_json_report(document, filename)
+
+
 def diagnostic_summary(result):
     severity_counts = {severity: 0 for severity in SEVERITY_ORDER}
     for issue in result.issues:
@@ -847,16 +860,7 @@ class AeroGuardApp:
         )
         if not filename:
             return
-        document = self.result.report_document()
-        suffix = Path(filename).suffix.casefold()
-        if suffix in {".md", ".markdown"}:
-            output = Path(filename)
-            output.write_text(export_markdown(document), encoding="utf-8")
-        elif suffix in {".html", ".htm"}:
-            output = Path(filename)
-            output.write_text(export_html(document), encoding="utf-8")
-        else:
-            output = save_json_report(document, filename)
+        output = export_document(self.result.report_document(), filename)
         self.status_var.set(tr("gui.status.report_saved", path=output))
 
     def _refresh_inventory(self):
