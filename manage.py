@@ -8,6 +8,7 @@ from i18n import localize_text, tr
 from management import AddonManager, ManagementError
 from notes import NoteStore, NoteStoreError
 from overrides import OverrideStore, OverrideStoreError
+from verify import VerifyError, verify_package
 
 
 def _print_json(document):
@@ -99,6 +100,9 @@ def _build_parser():
         "override-remove", help=tr("help.manage.override_remove")
     )
     override_remove.add_argument("override_id")
+
+    verify = commands.add_parser("verify", help=tr("help.manage.verify"))
+    verify.add_argument("package")
     return parser
 
 
@@ -111,6 +115,13 @@ def main(argv=None):
 
     args = _build_parser().parse_args(argv)
     try:
+        if args.command == "verify":
+            result = verify_package(
+                args.community_path, args.package, args.state_dir
+            )
+            _print_json(result)
+            return 0 if result["summary"]["error"] == 0 else 1
+
         if args.command in {"note-list", "note-add", "note-remove"}:
             note_store = NoteStore(args.community_path, args.state_dir)
             if args.command == "note-list":
@@ -165,7 +176,8 @@ def main(argv=None):
             raise AssertionError(f"未处理的命令：{args.command}")
         _print_json(result)
         return 0
-    except (ManagementError, NoteStoreError, OverrideStoreError) as error:
+    except (ManagementError, NoteStoreError, OverrideStoreError,
+            VerifyError) as error:
         print(
             tr("cli.manage_failed", error=localize_text(str(error))),
             file=sys.stderr,

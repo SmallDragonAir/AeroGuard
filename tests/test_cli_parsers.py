@@ -159,6 +159,11 @@ class ManageParserTest(unittest.TestCase):
                  "--rule", "R", "--action", "delete"]
             )
 
+    def test_verify_command(self):
+        args = self._parse(["C:/Community", "verify", "alpha"])
+        self.assertEqual(args.command, "verify")
+        self.assertEqual(args.package, "alpha")
+
     def test_missing_command_rejected(self):
         with self.assertRaises(SystemExit):
             self._parse(["C:/Community"])

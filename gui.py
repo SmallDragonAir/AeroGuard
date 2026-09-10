@@ -17,6 +17,7 @@ from i18n import (
     set_language,
     tr,
 )
+from verify import verify_package
 from main import run_diagnosis_with_context, save_json_report
 from history import HistoryError, HistoryStore
 from management import AddonManager, ManagementError
@@ -503,6 +504,7 @@ class AeroGuardApp:
             (tr("gui.action.install_zip"), self._choose_install_zip),
             (tr("gui.action.install_dir"), self._choose_install_directory),
             (tr("gui.action.rollback_install"), self._rollback_install),
+            (tr("gui.action.verify"), self._verify_selected),
         ):
             ttk.Button(button_bar, text=text, command=command).pack(
                 side="left", padx=(0, 6)
@@ -1214,6 +1216,35 @@ class AeroGuardApp:
             tr("gui.status.rollback_running", tid=transaction_id),
             lambda: manager.rollback_install(transaction_id),
             self._receive_management_action,
+        )
+
+    def _verify_selected(self):
+        """只读校验管理页签中选中的单个插件。"""
+        try:
+            record = self._selected_management_record()
+            community = self._community_path()
+        except (ValueError, ManagementError) as error:
+            messagebox.showerror(
+                "AeroGuard", localize_text(str(error)), parent=self.root
+            )
+            return
+        package = record["package"]
+
+        def receive(result):
+            summary = result["summary"]
+            self.status_var.set(tr(
+                "gui.status.verify_done",
+                package=result["package"],
+                error=summary["error"],
+                warning=summary["warning"],
+                info=summary["info"],
+            ))
+            self._show_json_detail(tr("gui.detail.verify"), result)
+
+        self._run_async(
+            tr("gui.status.verifying", package=package),
+            lambda: verify_package(community, package, self.state_dir),
+            receive,
         )
 
 

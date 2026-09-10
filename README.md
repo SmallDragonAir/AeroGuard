@@ -49,6 +49,7 @@ The current version scans add-ons in an MSFS Community folder and checks:
 - Ignoring OS/file-manager junk such as Thumbs.db / .DS_Store
 - Local knowledge records (manual notes per add-on / rule — a local seed of a known-issue database)
 - Rule overrides: ignore or downgrade a rule for a specific add-on, surfaced in reports and the GUI
+- Single add-on check: `manage verify PACKAGE` (or the GUI button) runs a read-only consistency check on one installed package
 
 `main.py`'s scan flow is always read-only. `manage.py` only moves or installs explicitly named packages when you run a management sub-command; by default it stores state, disabled packages, and backups in `.aeroguard/` next to the Community, and never touches `Official*`, `UserCfg.opt`, or the simulator's `Content.xml`.
 
@@ -201,7 +202,7 @@ Before replacing an existing package, the original directory is saved under `bac
 
 ### `gui.py` / `AeroGuard.pyw`
 
-The native desktop UI uses Tk 8.6 bundled with Python 3.12 — no third-party GUI dependency. Scans, install checks, and management operations run on background threads, so the window stays responsive during full scans. The UI offers five tabs: Issues, Conflicts & Dependencies, Add-on Management, Scan Errors, and History & Baselines; double-click a row to view the full JSON data. Profiles are dry-run first and show move/warning counts before applying. Closing the window while a background task is running asks for confirmation first, to avoid interrupting an install or rollback.
+The native desktop UI uses Tk 8.6 bundled with Python 3.12 — no third-party GUI dependency. Scans, install checks, and management operations run on background threads, so the window stays responsive during full scans. The UI offers five tabs: Issues, Conflicts & Dependencies, Add-on Management, Scan Errors, and History & Baselines; double-click a row to view the full JSON data. A "Verify selected add-on" button runs a read-only single-package consistency check. Profiles are dry-run first and show move/warning counts before applying. Closing the window while a background task is running asks for confirmation first, to avoid interrupting an install or rollback.
 
 ### `history.py` / `history_cli.py`
 
@@ -339,6 +340,9 @@ python manage.py D:\MSFS2024_DATA\Community profile-apply flying
 python manage.py D:\MSFS2024_DATA\Community check D:\Downloads\addon.zip
 python manage.py D:\MSFS2024_DATA\Community install D:\Downloads\addon.zip
 python manage.py D:\MSFS2024_DATA\Community rollback TRANSACTION_ID
+
+# Read-only consistency check of a single installed add-on
+python manage.py D:\MSFS2024_DATA\Community verify PACKAGE
 
 # Local knowledge records (offline seed of the known-issue database)
 python manage.py D:\MSFS2024_DATA\Community note-add PACKAGE --text "differs due to runtime self-update; safe to ignore" --rule LAYOUT_FILE_SIZE_MISMATCH
@@ -578,6 +582,7 @@ AeroGuard 是一个正在开发中的开源 MSFS 插件诊断工具，用于检�
 - 自动忽略 Thumbs.db / .DS_Store 等系统杂物文件
 - 本地已知结论记录（按插件 / 规则记录人工结论，已知异常数据库雏形）
 - 规则覆盖：可按（插件, 规则）忽略或降级扫描结果，并在报告与界面中体现
+- 单插件快速校验：`manage verify 包名`（或 GUI 按钮）只读检查单个已安装插件
 
 `main.py` 的扫描流程始终只读。`manage.py` 只在用户运行明确的管理子命令时
 移动或安装指定包；默认把状态、禁用包和备份存入 Community 同级的
@@ -768,7 +773,8 @@ Patch Hint 只在同一机场代码候选中作为意图信号，避免把互不
 原生桌面界面使用本机 Python 3.12 自带的 Tk 8.6，不引入第三方 GUI 依赖。
 扫描、安装检查和管理操作在后台线程执行，完整扫描期间窗口仍可响应。界面提供
 问题、冲突与依赖、插件管理、扫描异常、历史与基线五个页签，双击表格行可查看
-完整 JSON 数据。Profile 会先执行 dry-run 并显示移动数与警告数，再允许应用。
+完整 JSON 数据；提供"检查选中插件"按钮，对单个插件做只读一致性校验。
+Profile 会先执行 dry-run 并显示移动数与警告数，再允许应用。
 后台任务运行期间关闭窗口会先请求确认，避免中断正在进行的安装或回滚。
 
 ### `history.py` / `history_cli.py`
@@ -913,6 +919,9 @@ python manage.py D:\MSFS2024_DATA\Community profile-apply flying
 python manage.py D:\MSFS2024_DATA\Community check D:\Downloads\addon.zip
 python manage.py D:\MSFS2024_DATA\Community install D:\Downloads\addon.zip
 python manage.py D:\MSFS2024_DATA\Community rollback TRANSACTION_ID
+
+# 只读校验单个已安装插件
+python manage.py D:\MSFS2024_DATA\Community verify PACKAGE
 
 # 本地已知结论记录（已知异常数据库的纯本地雏形，不联网）
 python manage.py D:\MSFS2024_DATA\Community note-add PACKAGE --text "该差异由运行期自更新导致，可忽略" --rule LAYOUT_FILE_SIZE_MISMATCH

@@ -117,6 +117,7 @@ _register("gui.action.apply_profile", "应用 Profile", "Apply Profile")
 _register("gui.action.install_zip", "安装 ZIP", "Install ZIP")
 _register("gui.action.install_dir", "安装目录", "Install folder")
 _register("gui.action.rollback_install", "回滚安装", "Rollback install")
+_register("gui.action.verify", "检查选中插件", "Verify selected add-on")
 _register("gui.action.refresh_history", "刷新历史", "Refresh history")
 _register("gui.action.record_snapshot", "记录当前结果", "Record current result")
 _register("gui.action.set_baseline", "设为基线", "Set as baseline")
@@ -127,6 +128,12 @@ _register("gui.detail.issue", "检测详情", "Issue detail")
 _register("gui.detail.addon", "插件详情", "Add-on detail")
 _register("gui.detail.dependency_warnings", "依赖警告", "Dependency warnings")
 _register("gui.detail.install_transaction", "安装事务", "Install transaction")
+_register("gui.detail.verify", "单插件校验", "Single add-on check")
+_register("gui.status.verifying", "正在校验 {package}…",
+          "Verifying {package}...")
+_register("gui.status.verify_done",
+          "{package}：ERROR {error} / WARNING {warning} / INFO {info}",
+          "{package}: ERROR {error} / WARNING {warning} / INFO {info}")
 _register("gui.export.title", "导出 AeroGuard JSON 报告",
           "Export AeroGuard JSON report")
 _register("gui.export.all_files", "所有文件", "All files")
@@ -578,6 +585,8 @@ _register("help.manage.install", "检查后安装并保留旧版本",
           "Inspect, install, and keep the previous version")
 _register("help.manage.rollback", "回滚一个已提交的安装事务",
           "Roll back a committed install transaction")
+_register("help.manage.verify", "只读校验单个已安装插件包",
+          "Read-only consistency check of a single installed add-on")
 _register("help.manage.note_list", "列出本地已知结论记录（已知异常数据库雏形）",
           "List local knowledge records (seed of a known-issue database)")
 _register("help.manage.note_add", "记录一条针对插件/规则的本地已知结论",
@@ -814,6 +823,15 @@ _MESSAGE_TEMPLATES = (
      "about to leave the Community"),
     (r"Profile 中的包当前未安装",
      "The package in this Profile is not currently installed"),
+    # --- 单插件校验 ---
+    (r"插件名不能为空", "Package name must not be empty"),
+    (r"未找到插件：(?P<name>.+)", "Add-on not found: {name}"),
+    (r"缺少 manifest\.json：(?P<name>.+)",
+     "manifest.json is missing: {name}"),
+    (r"插件 manifest\.json 无法解析：(?P<error>.+)",
+     "Failed to parse the add-on manifest.json: {error}"),
+    (r"插件 manifest\.json 顶层必须是 JSON 对象",
+     "The add-on manifest.json must be a JSON object"),
     # --- 历史 / 基线 ---
     (r"报告必须是 JSON 对象", "The report must be a JSON object"),
     (r"基线和当前快照必须是 JSON 对象",
