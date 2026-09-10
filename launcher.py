@@ -18,6 +18,7 @@ import gui
 import history_cli
 import main as scan_cli
 import manage
+from i18n import tr
 
 
 #: 第一参数到目标模块的映射（None 表示缺省 = GUI）
@@ -94,7 +95,7 @@ def main(argv=None):
     target, remainder = select_command(argv)
 
     if target == "help":
-        print(USAGE)
+        print(tr("launcher.usage"))
         return 0
 
     if target == "gui":

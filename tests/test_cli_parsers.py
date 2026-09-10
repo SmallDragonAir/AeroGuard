@@ -132,6 +132,33 @@ class ManageParserTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self._parse(["C:/Community", "note-add", "alpha"])
 
+    def test_override_commands(self):
+        args = self._parse(["C:/Community", "override-list"])
+        self.assertEqual(args.command, "override-list")
+        self.assertIsNone(args.package)
+
+        args = self._parse(
+            ["C:/Community", "override-add", "alpha",
+             "--rule", "LAYOUT_FILE_MISSING", "--action", "ignore",
+             "--reason", "safe"]
+        )
+        self.assertEqual(args.command, "override-add")
+        self.assertEqual(args.action, "ignore")
+        self.assertEqual(args.rule, "LAYOUT_FILE_MISSING")
+
+        args = self._parse(["C:/Community", "override-remove", "o-1"])
+        self.assertEqual(args.command, "override-remove")
+        self.assertEqual(args.override_id, "o-1")
+
+    def test_override_add_requires_rule_and_valid_action(self):
+        with self.assertRaises(SystemExit):
+            self._parse(["C:/Community", "override-add", "alpha"])
+        with self.assertRaises(SystemExit):
+            self._parse(
+                ["C:/Community", "override-add", "alpha",
+                 "--rule", "R", "--action", "delete"]
+            )
+
     def test_missing_command_rejected(self):
         with self.assertRaises(SystemExit):
             self._parse(["C:/Community"])
@@ -214,6 +241,57 @@ class HistoryCliSummaryTest(unittest.TestCase):
         }
         text = history_cli._compare_summary(comparison)
         self.assertIn("无差异", text)
+
+
+class HelpLocalizationTest(unittest.TestCase):
+    """--help 文案随语言切换（解析器在运行时构建）。"""
+
+    def setUp(self):
+        from i18n import set_language
+        self._set_language = set_language
+        self.addCleanup(set_language, None)
+
+    def _help(self, caller, argv):
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            with self.assertRaises(SystemExit):
+                caller(argv)
+        return buffer.getvalue()
+
+    def test_main_help_english_and_chinese(self):
+        self._set_language("en")
+        self.assertIn(
+            "MSFS package consistency diagnostics",
+            self._help(main_cli.parse_args, ["--help"]),
+        )
+        self._set_language("zh")
+        self.assertIn(
+            "插件一致性诊断工具",
+            self._help(main_cli.parse_args, ["--help"]),
+        )
+
+    def test_manage_help_english(self):
+        self._set_language("en")
+        text = self._help(
+            lambda argv: manage_cli._build_parser().parse_args(argv),
+            ["--help"],
+        )
+        self.assertIn("add-on management", text)
+        self.assertIn("List local knowledge records", text)
+
+    def test_history_help_english(self):
+        self._set_language("en")
+        text = self._help(
+            lambda argv: history_cli._build_parser().parse_args(argv),
+            ["--help"],
+        )
+        self.assertIn("Record compact scan history", text)
+        self.assertIn("Re-scan and compare", text)
+
+    def test_gui_help_english_via_preset(self):
+        import gui as gui_cli
+        text = self._help(gui_cli.parse_args, ["--lang", "en", "--help"])
+        self.assertIn("Launch the native AeroGuard desktop UI", text)
 
 
 if __name__ == "__main__":

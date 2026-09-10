@@ -6,7 +6,8 @@ import sys
 from pathlib import Path
 
 from history import HistoryError, HistoryStore, build_snapshot, compare_snapshots
-from main import run_full_diagnosis
+from i18n import localize_text, tr
+from main import run_diagnosis_with_context
 from report import build_report
 
 
@@ -21,19 +22,27 @@ def _compare_summary(comparison):
     for section, counts in summary.get("sections", {}).items():
         total = sum(counts.values())
         if total:
-            section_counts.append(f"{section} {total} 项")
-    detail = "、".join(section_counts) if section_counts else "无差异"
-    return (
-        f"基线比较 {comparison.get('baseline_name', '')}: "
-        f"共 {summary.get('total_changes', 0)} 项变化"
-        f"（{detail}）；兼容性提示 "
-        f"{summary.get('compatibility_warnings', 0)} 条"
+            section_counts.append(
+                f"{section} {tr('cli.count_items', n=total)}"
+            )
+    detail = (
+        "、".join(section_counts) if section_counts
+        else tr("cli.compare_no_diff")
+    )
+    return tr(
+        "cli.compare_summary",
+        name=comparison.get("baseline_name", ""),
+        changes=summary.get("total_changes", 0),
+        detail=detail,
+        warnings=summary.get("compatibility_warnings", 0),
     )
 
 
-def _run_report(community_path, mode):
+def _run_report(community_path, mode, state_dir=None):
     addons, scan_errors, issues, stats, relationships, timing = (
-        run_full_diagnosis(community_path, full_scan=(mode == "full"))
+        run_diagnosis_with_context(
+            community_path, full_scan=(mode == "full"), state_dir=state_dir
+        )
     )
     return build_report(
         community_path=community_path,
@@ -50,25 +59,29 @@ def _run_report(community_path, mode):
 def _build_parser():
     parser = argparse.ArgumentParser(
         prog="aeroguard-history",
-        description="记录紧凑扫描历史并与命名环境基线比较。",
+        description=tr("help.history.description"),
     )
     parser.add_argument("community_path")
     parser.add_argument("--state-dir")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    record = commands.add_parser("record", help="扫描并保存紧凑快照")
+    record = commands.add_parser("record", help=tr("help.history.record"))
     record.add_argument("--mode", choices=("quick", "full"), default="quick")
     record.add_argument("--label")
 
-    listing = commands.add_parser("list", help="列出历史快照")
+    listing = commands.add_parser("list", help=tr("help.history.list"))
     listing.add_argument("--limit", type=int, default=20)
 
-    baseline = commands.add_parser("baseline-set", help="把历史快照设为命名基线")
+    baseline = commands.add_parser(
+        "baseline-set", help=tr("help.history.baseline_set")
+    )
     baseline.add_argument("name")
     baseline.add_argument("--snapshot")
     baseline.add_argument("--replace", action="store_true")
 
-    compare = commands.add_parser("compare", help="重新扫描并与命名基线比较")
+    compare = commands.add_parser(
+        "compare", help=tr("help.history.compare")
+    )
     compare.add_argument("name")
     compare.add_argument("--mode", choices=("quick", "full"), default="quick")
     compare.add_argument("--record", action="store_true")
@@ -88,7 +101,8 @@ def main(argv=None):
         store = HistoryStore(community, args.state_dir)
         if args.command == "record":
             result = store.record(
-                _run_report(community, args.mode), label=args.label
+                _run_report(community, args.mode, args.state_dir),
+                label=args.label
             )
         elif args.command == "list":
             if args.limit < 1:
@@ -100,7 +114,7 @@ def main(argv=None):
                 args.name, snapshot_id=args.snapshot, replace=args.replace
             )
         elif args.command == "compare":
-            report = _run_report(community, args.mode)
+            report = _run_report(community, args.mode, args.state_dir)
             if args.record:
                 current = store.record(report, label=args.label)
                 baseline = store.load_baseline(args.name)
@@ -115,7 +129,10 @@ def main(argv=None):
             print(_compare_summary(result), file=sys.stderr)
         return 0
     except HistoryError as error:
-        print(f"历史操作失败：{error}", file=sys.stderr)
+        print(
+            tr("cli.history_failed", error=localize_text(str(error))),
+            file=sys.stderr,
+        )
         return 2
 
 
