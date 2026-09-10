@@ -5,16 +5,78 @@ from pathlib import Path
 from gui import (
     conflict_table_rows,
     diagnostic_summary,
+    filter_rows,
+    issue_row_tag,
     issue_table_rows,
     management_table_rows,
     parse_args,
     run_desktop_scan,
+    sort_rows,
     _lang_code_from_display,
     _lang_display_name,
 )
 from relationships import RelationshipAnalysis
 
 from .fixtures import make_addon
+
+
+class RowHelpersTest(unittest.TestCase):
+
+    def test_issue_row_tag_mapping(self):
+        self.assertEqual(
+            issue_row_tag({"severity": "error"}), "tag_error"
+        )
+        self.assertEqual(
+            issue_row_tag({"severity": "warning"}), "tag_warning"
+        )
+        self.assertEqual(
+            issue_row_tag({"severity": "info"}), "tag_info"
+        )
+        self.assertEqual(
+            issue_row_tag({"severity": "error",
+                           "override": {"action": "downgrade"}}),
+            "tag_downgraded",
+        )
+        self.assertEqual(
+            issue_row_tag({"severity": "info",
+                           "original_severity": "warning"}),
+            "tag_downgraded",
+        )
+
+    def test_filter_rows_by_query(self):
+        rows = [
+            {"values": ("ERROR", "R1", "alpha", 1, "", "msg x", "note")},
+            {"values": ("INFO", "R2", "beta", 2, "", "hello", "")},
+        ]
+        self.assertEqual(len(filter_rows(rows, "")), 2)
+        self.assertEqual(len(filter_rows(rows, "alpha")), 1)
+        self.assertEqual(len(filter_rows(rows, "hello")), 1)
+        self.assertEqual(len(filter_rows(rows, "MISS")), 0)
+
+    def test_sort_rows_numeric_then_text(self):
+        rows = [
+            {"values": ("a", 100)},
+            {"values": ("b", 2)},
+            {"values": ("c", 10)},
+        ]
+        ascending = sort_rows(rows, 1, reverse=False)
+        self.assertEqual(
+            [row["values"][1] for row in ascending], [2, 10, 100]
+        )
+        descending = sort_rows(rows, 1, reverse=True)
+        self.assertEqual(
+            [row["values"][1] for row in descending], [100, 10, 2]
+        )
+
+    def test_sort_rows_text_case_insensitive(self):
+        rows = [
+            {"values": ("Beta",)},
+            {"values": ("alpha",)},
+        ]
+        sorted_rows = sort_rows(rows, 0)
+        self.assertEqual(
+            [row["values"][0] for row in sorted_rows], ["alpha", "Beta"]
+        )
 
 
 class GuiDataTest(unittest.TestCase):

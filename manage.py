@@ -4,8 +4,10 @@ import argparse
 import json
 import sys
 
+from i18n import localize_text, tr
 from management import AddonManager, ManagementError
 from notes import NoteStore, NoteStoreError
+from overrides import OverrideStore, OverrideStoreError
 
 
 def _print_json(document):
@@ -15,59 +17,88 @@ def _print_json(document):
 def _build_parser():
     parser = argparse.ArgumentParser(
         prog="aeroguard-manage",
-        description="AeroGuard 插件管理（只操作指定 Community 与管理状态目录）。",
+        description=tr("help.manage.description"),
     )
-    parser.add_argument("community_path", help="Community 或 Community2024 路径")
+    parser.add_argument("community_path", help=tr("help.manage.community"))
     parser.add_argument(
         "--state-dir",
-        help="管理状态目录；默认使用 Community 同级的 .aeroguard",
+        help=tr("help.manage.state_dir"),
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
-    commands.add_parser("inventory", help="列出启用、禁用与隔离包")
-    commands.add_parser("versions", help="列出当前与已归档版本")
+    commands.add_parser("inventory", help=tr("help.manage.inventory"))
+    commands.add_parser("versions", help=tr("help.manage.versions"))
 
-    for command, help_text in (
-        ("disable", "禁用一个包"),
-        ("enable", "启用一个包"),
-        ("restore", "从隔离区恢复一个包"),
+    for command, help_key in (
+        ("disable", "help.manage.disable"),
+        ("enable", "help.manage.enable"),
+        ("restore", "help.manage.restore"),
     ):
-        subparser = commands.add_parser(command, help=help_text)
+        subparser = commands.add_parser(command, help=tr(help_key))
         subparser.add_argument("package")
 
-    quarantine = commands.add_parser("quarantine", help="把包移入安全隔离区")
+    quarantine = commands.add_parser(
+        "quarantine", help=tr("help.manage.quarantine")
+    )
     quarantine.add_argument("package")
     quarantine.add_argument("--reason", default="manual quarantine")
 
-    profile_save = commands.add_parser("profile-save", help="保存当前启用状态")
+    profile_save = commands.add_parser(
+        "profile-save", help=tr("help.manage.profile_save")
+    )
     profile_save.add_argument("name")
     profile_save.add_argument("--replace", action="store_true")
-    profile_apply = commands.add_parser("profile-apply", help="应用已保存的 Profile")
+    profile_apply = commands.add_parser(
+        "profile-apply", help=tr("help.manage.profile_apply")
+    )
     profile_apply.add_argument("name")
     profile_apply.add_argument("--dry-run", action="store_true")
 
-    check = commands.add_parser("check", help="只读检查目录或 ZIP 安装源")
+    check = commands.add_parser("check", help=tr("help.manage.check"))
     check.add_argument("source")
-    install = commands.add_parser("install", help="检查后安装并保留旧版本")
+    install = commands.add_parser("install", help=tr("help.manage.install"))
     install.add_argument("source")
     install.add_argument("--allow-executables", action="store_true")
-    rollback = commands.add_parser("rollback", help="回滚一个已提交的安装事务")
+    rollback = commands.add_parser(
+        "rollback", help=tr("help.manage.rollback")
+    )
     rollback.add_argument("transaction_id")
 
     note_list = commands.add_parser(
-        "note-list", help="列出本地已知结论记录（已知异常数据库雏形）"
+        "note-list", help=tr("help.manage.note_list")
     )
     note_list.add_argument("package", nargs="?")
     note_add = commands.add_parser(
-        "note-add", help="记录一条针对插件/规则的本地已知结论"
+        "note-add", help=tr("help.manage.note_add")
     )
     note_add.add_argument("package")
-    note_add.add_argument("--text", required=True, help="结论文本")
-    note_add.add_argument("--rule", help="可选的规则 ID（如 LAYOUT_FILE_SIZE_MISMATCH）")
+    note_add.add_argument("--text", required=True,
+                          help=tr("help.manage.note_text"))
+    note_add.add_argument("--rule", help=tr("help.manage.note_rule"))
     note_remove = commands.add_parser(
-        "note-remove", help="删除一条本地已知结论"
+        "note-remove", help=tr("help.manage.note_remove")
     )
     note_remove.add_argument("note_id")
+
+    override_list = commands.add_parser(
+        "override-list", help=tr("help.manage.override_list")
+    )
+    override_list.add_argument("package", nargs="?")
+    override_list.add_argument("--rule")
+    override_add = commands.add_parser(
+        "override-add", help=tr("help.manage.override_add")
+    )
+    override_add.add_argument("package")
+    override_add.add_argument("--rule", required=True,
+                              help=tr("help.manage.override_rule"))
+    override_add.add_argument(
+        "--action", required=True, choices=("ignore", "downgrade")
+    )
+    override_add.add_argument("--reason")
+    override_remove = commands.add_parser(
+        "override-remove", help=tr("help.manage.override_remove")
+    )
+    override_remove.add_argument("override_id")
     return parser
 
 
@@ -88,6 +119,19 @@ def main(argv=None):
                 result = note_store.add(args.package, args.text, args.rule)
             else:
                 result = note_store.remove(args.note_id)
+            _print_json(result)
+            return 0
+
+        if args.command in {"override-list", "override-add", "override-remove"}:
+            override_store = OverrideStore(args.community_path, args.state_dir)
+            if args.command == "override-list":
+                result = override_store.list(args.package, args.rule)
+            elif args.command == "override-add":
+                result = override_store.add(
+                    args.package, args.rule, args.action, args.reason
+                )
+            else:
+                result = override_store.remove(args.override_id)
             _print_json(result)
             return 0
 
@@ -121,8 +165,11 @@ def main(argv=None):
             raise AssertionError(f"未处理的命令：{args.command}")
         _print_json(result)
         return 0
-    except (ManagementError, NoteStoreError) as error:
-        print(f"管理操作失败：{error}", file=sys.stderr)
+    except (ManagementError, NoteStoreError, OverrideStoreError) as error:
+        print(
+            tr("cli.manage_failed", error=localize_text(str(error))),
+            file=sys.stderr,
+        )
         return 2
 
 

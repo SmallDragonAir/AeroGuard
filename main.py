@@ -21,6 +21,10 @@ from analyzer import analyze_community_with_stats
 from classifier import classify_issues
 from noise import apply_noise_rules
 from relationships import analyze_relationships
+from i18n import localize_text, tr
+from notes import NoteStore, NoteStoreError
+from overrides import OverrideStore, OverrideStoreError
+from knowledge import apply_known_context
 from report import (
     build_report,
     group_issues_by_package,
@@ -43,39 +47,35 @@ def _reconfigure_stdout():
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         prog="aeroguard",
-        description="AeroGuard —— MSFS 插件一致性诊断工具（开发版 CLI）。",
-        epilog=(
-            "示例：\n"
-            "  python main.py\n"
-            "  python main.py D:\\MSFS2024_DATA\\Community --mode full\n"
-            "  python main.py <路径> --mode quick --json\n"
-        ),
+        description=tr("help.main.description"),
+        epilog=tr("help.main.epilog"),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "community_path",
         nargs="?",
-        help="MSFS Community 文件夹路径（缺省时交互输入）",
+        help=tr("help.main.community"),
     )
     parser.add_argument(
         "--mode",
         choices=["quick", "full"],
-        help="扫描模式：quick=快速扫描，full=完整扫描（缺省时交互选择）",
+        help=tr("help.main.mode"),
     )
     parser.add_argument(
         "--json",
         nargs="?",
         const="",
         metavar="PATH",
-        help=(
-            "同时把完整报告写入 JSON 文件；"
-            "不写 PATH 时自动保存到 reports/ 目录"
-        ),
+        help=tr("help.main.json"),
     )
     parser.add_argument(
         "--no-relationships",
         action="store_true",
-        help="跳过跨 Package 冲突/依赖分析（快速扫描可明显提速）",
+        help=tr("help.main.no_relationships"),
+    )
+    parser.add_argument(
+        "--state-dir",
+        help=tr("help.main.state_dir"),
     )
     return parser.parse_args(argv)
 
@@ -85,14 +85,14 @@ def collect_input(args):
     community_path = args.community_path
 
     if community_path is None:
-        community_path = input("请输入 MSFS Community 文件夹路径：")
+        community_path = input(tr("report.prompt_path"))
 
     community_path = Path(community_path.strip().strip('"'))
 
     mode = args.mode
 
     if mode is None:
-        choice = input("扫描模式[1=快速扫描/2=完整扫描]：").strip()
+        choice = input(tr("report.prompt_mode")).strip()
         mode = "full" if choice == "2" else "quick"
 
     return community_path, mode
@@ -100,42 +100,51 @@ def collect_input(args):
 
 def print_text_report(*, community_path, scan_mode, addons, scan_errors,
                       issues, stats, timing, relationships=None):
-    """向终端打印可读的报告文本。"""
-    print(f"Community 路径：{community_path}")
-    print(f"扫描模式：{'完整扫描' if scan_mode == 'full' else '快速扫描'}")
-    print("插件总数：", len(addons))
-    print("扫描异常：", len(scan_errors))
-    print("检测问题：", len(issues))
+    """向终端打印可读的报告文本（按当前语言）。"""
+    print(tr("report.community_path", path=community_path))
+    print(tr(
+        "report.scan_mode",
+        mode=(tr("report.mode_full") if scan_mode == "full"
+              else tr("report.mode_quick")),
+    ))
+    print(tr("report.addons", n=len(addons)))
+    print(tr("report.scan_errors", n=len(scan_errors)))
+    print(tr("report.issues", n=len(issues)))
     downgraded = [issue for issue in issues if "downgrade_rule" in issue]
     if downgraded:
-        print(
-            "自动降噪：",
-            len(downgraded),
-            "条问题 /",
-            sum(issue["affected_count"] for issue in downgraded),
-            "个项目",
-        )
+        print(tr(
+            "report.downgraded",
+            n=len(downgraded),
+            affected=sum(
+                issue["affected_count"] for issue in downgraded
+            ),
+        ))
     if relationships is not None:
         relation_summary = relationships.summary()
-        print("资源冲突候选：", relation_summary["resource_conflicts"])
-        print("机场重复候选：", relation_summary["airport_conflicts"])
-        print("声明依赖：", relation_summary["declared_dependencies"])
+        print(tr("report.resource_conflicts",
+                 n=relation_summary["resource_conflicts"]))
+        print(tr("report.airport_conflicts",
+                 n=relation_summary["airport_conflicts"]))
+        print(tr("report.declared_dependencies",
+                 n=relation_summary["declared_dependencies"]))
 
     # === 1. 按规则统计 ===
-    print("\n按规则：")
+    print(tr("report.by_rule"))
 
     for item in rule_summary(issues):
         affected_part = (
-            f" / {item['affected']} 个项目"
+            tr("report.rule_affected", n=item["affected"])
             if item["affected"] else ""
         )
-        print(
-            f"  {item['rule_id']}: "
-            f"{item['packages']} 个插件{affected_part}"
-        )
+        print(tr(
+            "report.rule_line",
+            rule=item["rule_id"],
+            packages=item["packages"],
+            affected=affected_part,
+        ))
 
     # === 2. 异常数量排行 ===
-    print("\n=== 异常数量 TOP 10 ===")
+    print(tr("report.top_issues"))
 
     for issue in top_issues(issues, limit=10):
         print(
@@ -145,149 +154,174 @@ def print_text_report(*, community_path, scan_mode, addons, scan_errors,
         )
 
     # === 3. 按插件汇总 ===
-    print("\n=== 按插件汇总 ===")
+    print(tr("report.by_package"))
 
     for package, package_issues in group_issues_by_package(issues).items():
         print("\n", package)
 
         for issue in package_issues:
             affected = issue.get("affected_count", 1)
-            suffix = f"（影响 {affected} 项）" if affected > 1 else ""
-
-            print(
-                f"  [{issue['severity'].upper()}] "
-                f"{issue['rule_id']} - "
-                f"{issue['message']}{suffix}"
+            suffix = (
+                tr("report.issue_suffix", n=affected) if affected > 1 else ""
             )
+
+            print(tr(
+                "report.issue_line",
+                severity=issue['severity'].upper(),
+                rule=issue['rule_id'],
+                message=issue['message'],
+                suffix=suffix,
+            ))
             if "downgrade_rule" in issue:
-                print(
-                    f"    已降级：{issue['downgrade_reason']} "
-                    f"（抽样 {issue['downgrade_evidence']['sampled_files']} 项）"
-                )
+                print(tr(
+                    "report.downgrade_note",
+                    reason=issue['downgrade_reason'],
+                    n=issue['downgrade_evidence']['sampled_files'],
+                ))
 
     # === 4. 缺失文件详情 ===
-    print("\n=== 缺失文件详情 ===")
+    print(tr("report.missing_detail"))
 
     for issue in missing_file_issues(issues):
-        print(f"\n插件：{issue['package']}（{issue['affected_count']} 项缺失）")
+        print(tr("report.missing_for",
+                 package=issue['package'], n=issue['affected_count']))
 
         for file_path in issue.get("preview", []):
-            print("  缺失：", file_path)
+            print(tr("report.missing_item", path=file_path))
 
         hidden_count = (
             issue["affected_count"] - len(issue.get("preview", []))
         )
         if hidden_count > 0:
-            print(f"  … 另有 {hidden_count} 项未显示，"
-                  f"可用 --json 查看完整明细")
+            print(tr("report.missing_more", n=hidden_count))
 
     # === 5. 重点复核排行 ===
-    print("\n=== 重点复核 TOP 10 ===")
+    print(tr("report.review_top"))
 
     for package, stats_dict in top_risk_packages(issues, limit=10):
-        print(
-            f"{package} | "
-            f"ERROR {stats_dict['error']} | "
-            f"WARNING {stats_dict['warning']} | "
-            f"INFO {stats_dict['info']} | "
-            f"影响 {stats_dict['affected']} 项"
-        )
+        print(tr(
+            "report.review_line",
+            package=package,
+            error=stats_dict['error'],
+            warning=stats_dict['warning'],
+            info=stats_dict['info'],
+            affected=stats_dict['affected'],
+        ))
 
     # === 6. 缺失文件按影响复核 ===
     # 当前主要根据 impact 与受影响项目数量排序。
-    print("\n=== 缺失文件重点复核 ===")
+    print(tr("report.missing_review"))
 
     for issue in rank_missing_issues(missing_file_issues(issues)):
-        print(
-            f"{issue['package']} | "
-            f"{issue.get('impact', 'unknown').upper()} | "
-            f"影响 {issue.get('affected_count', 1)} 项"
-        )
+        print(tr(
+            "report.missing_review_line",
+            package=issue['package'],
+            impact=issue.get('impact', 'unknown').upper(),
+            n=issue.get('affected_count', 1),
+        ))
 
     # === 7. 跨 Package 关系 ===
     if relationships is not None:
-        print("\n=== Package 资源冲突 TOP 10 ===")
+        print(tr("report.rel_conflicts"))
         for conflict in relationships.resource_conflicts[:10]:
             package_names = ", ".join(
                 item["package"] for item in conflict["packages"]
             )
-            print(
-                f"[{conflict['severity'].upper()}] {conflict['path']} | "
-                f"{package_names}"
-            )
-            print(f"  判断：{conflict['reason']}")
+            print(tr(
+                "report.rel_conflict_line",
+                severity=conflict['severity'].upper(),
+                path=conflict['path'],
+                packages=package_names,
+            ))
+            print(tr("report.judgement", reason=conflict['reason']))
             if conflict["likely_winner"] is not None:
-                print(
-                    "  默认优先：",
-                    conflict["likely_winner"]["package"],
-                    f"（{conflict['likely_winner']['basis']}）",
-                )
+                print(tr(
+                    "report.default_priority",
+                    package=conflict["likely_winner"]["package"],
+                    basis=conflict["likely_winner"]["basis"],
+                ))
 
-        print("\n=== 机场重复 / 覆盖候选 ===")
+        print(tr("report.airports"))
         if not relationships.airport_conflicts:
-            print("未发现高置信度的 Community 内机场重复候选。")
+            print(tr("report.airports_none"))
         for conflict in relationships.airport_conflicts:
             package_names = ", ".join(
                 item["package"] for item in conflict["packages"]
             )
-            print(
-                f"[{conflict['severity'].upper()}] "
-                f"{conflict['airport_code']} | "
-                f"{package_names}"
-            )
-            print(f"  判断：{conflict['reason']}")
+            print(tr(
+                "report.rel_conflict_line",
+                severity=conflict['severity'].upper(),
+                path=conflict['airport_code'],
+                packages=package_names,
+            ))
+            print(tr("report.judgement", reason=conflict['reason']))
 
         summary = relationships.summary()
-        print("\n=== 插件依赖分析 ===")
-        print(
-            "当前根目录内已解析：",
-            summary["dependencies_resolved_in_scan_root"],
-        )
-        print(
-            "扫描范围外未解析：",
-            summary["dependencies_outside_scan_scope"],
-        )
-        print("无效依赖条目：", summary["invalid_dependencies"])
-        print("依赖环：", summary["dependency_cycles"])
+        print(tr("report.deps"))
+        print(tr(
+            "report.deps_resolved",
+            n=summary["dependencies_resolved_in_scan_root"],
+        ))
+        print(tr(
+            "report.deps_outside",
+            n=summary["dependencies_outside_scan_scope"],
+        ))
+        print(tr("report.deps_invalid", n=summary["invalid_dependencies"]))
+        print(tr("report.deps_cycles", n=summary["dependency_cycles"]))
 
     # === 8. 扫描错误明细 ===
     if scan_errors:
-        print("\n=== 扫描错误 ===")
+        print(tr("report.scan_error_detail"))
 
         for error in scan_errors:
-            print(f"\n插件：{error['package']}")
-            print(f"  路径：{error['path']}")
-            print(f"  错误：{error['error']}")
+            print(tr("report.scan_error_for", package=error['package']))
+            print(tr("report.scan_error_path", path=error['path']))
+            print(tr("report.scan_error_text", error=error['error']))
 
     # === 9. 性能统计 ===
-    print("\n=== 性能统计 ===")
-    print("Scanner：", round(timing["scanner"], 2), "秒")
-    print("Analyzer：", round(timing["analyzer"], 2), "秒")
-    print("降噪规则：", round(timing.get("noise_filter", 0.0), 4), "秒")
-    print("Classifier：", round(timing["classifier"], 4), "秒")
-    print("关系分析：", round(timing.get("relationships", 0.0), 3), "秒")
-    print("总耗时：", round(timing["total"], 2), "秒")
+    print(tr("report.performance"))
+    print(tr("report.perf_line", label="Scanner",
+             value=round(timing["scanner"], 2)))
+    print(tr("report.perf_line", label="Analyzer",
+             value=round(timing["analyzer"], 2)))
+    print(tr(
+        "report.perf_line",
+        label=tr("report.perf_noise_label"),
+        value=round(timing.get("noise_filter", 0.0), 4),
+    ))
+    print(tr("report.perf_line", label="Classifier",
+             value=round(timing["classifier"], 4)))
+    print(tr(
+        "report.perf_line",
+        label=tr("report.perf_relationships_label"),
+        value=round(timing.get("relationships", 0.0), 3),
+    ))
+    print(tr("report.perf_total", value=round(timing["total"], 2)))
 
     if stats is not None:
-        print("  Analyzer 内部：")
-        print("    Layout 解析：", round(stats.layout_parse_time, 2), "秒")
-        print("    声明文件检查：", round(stats.declared_check_time, 2), "秒")
+        print(tr("report.perf_internal"))
+        print(tr("report.perf_layout",
+                 value=round(stats.layout_parse_time, 2)))
+        print(tr("report.perf_declared",
+                 value=round(stats.declared_check_time, 2)))
         if stats.tree_walk_wall_time:
-            print(
-                "    文件树遍历（线程累计 / 墙钟）：",
-                round(stats.tree_walk_time, 2), "秒 /",
-                round(stats.tree_walk_wall_time, 2), "秒",
-            )
+            print(tr(
+                "report.perf_tree_parallel",
+                total=round(stats.tree_walk_time, 2),
+                wall=round(stats.tree_walk_wall_time, 2),
+            ))
         else:
-            print("    文件树遍历：", round(stats.tree_walk_time, 2), "秒")
+            print(tr("report.perf_tree",
+                     value=round(stats.tree_walk_time, 2)))
         if stats.package_timings:
-            print("  文件树遍历热点 TOP 5：")
+            print(tr("report.perf_hotspots"))
             for item in stats.package_timings[:5]:
-                print(
-                    f"    {item['package']}："
-                    f"{item['tree_walk_time']:.2f} 秒 / "
-                    f"{item['file_count']} 个文件"
-                )
+                print(tr(
+                    "report.perf_hotspot_line",
+                    package=item['package'],
+                    seconds=item['tree_walk_time'],
+                    files=item['file_count'],
+                ))
 
 
 def save_json_report(document, requested_path):
@@ -365,6 +399,45 @@ def run_full_diagnosis(community_path, full_scan, *, with_relationships=True):
     return addons, scan_errors, issues, stats, relationships, timing
 
 
+def run_diagnosis_with_context(community_path, full_scan, *, state_dir=None,
+                               with_relationships=True):
+    """在完整诊断之上应用本地知识上下文（notes 匹配 + 规则覆盖）。
+
+    与 run_full_diagnosis 同构；state_dir 缺省时使用 Community 同级的
+    .aeroguard（与 manage / history 默认一致），以便自动关联已有
+    已知结论与覆盖规则。stores 不存在或损坏时静默跳过，不影响扫描。
+    """
+    addons, scan_errors, issues, stats, relationships, timing = (
+        run_full_diagnosis(
+            community_path, full_scan,
+            with_relationships=with_relationships,
+        )
+    )
+
+    knowledge_start = time.perf_counter()
+
+    note_store = None
+    try:
+        note_store = NoteStore(community_path, state_dir)
+    except NoteStoreError:
+        note_store = None
+    override_store = None
+    try:
+        override_store = OverrideStore(community_path, state_dir)
+    except OverrideStoreError:
+        override_store = None
+
+    issues = apply_known_context(
+        issues, addons,
+        note_store=note_store, override_store=override_store,
+    )
+
+    timing["knowledge"] = time.perf_counter() - knowledge_start
+    timing["total"] += timing["knowledge"]
+
+    return addons, scan_errors, issues, stats, relationships, timing
+
+
 def main(argv=None):
     _reconfigure_stdout()
 
@@ -373,25 +446,22 @@ def main(argv=None):
     try:
         community_path, mode = collect_input(args)
     except EOFError:
-        print(
-            "没有可用的交互输入（标准输入已关闭）；请使用非交互参数：\n"
-            "  python main.py <Community 路径> --mode quick|full [--json]",
-            file=sys.stderr,
-        )
+        print(tr("report.eof_hint"), file=sys.stderr)
         return 2
 
     if not community_path.exists():
-        print("路径不存在，请检查输入的路径是否正确。")
+        print(tr("report.path_missing"))
         return 1
 
     if not community_path.is_dir():
-        print("输入的路径不是一个目录。")
+        print(tr("report.path_not_dir"))
         return 1
 
     addons, scan_errors, issues, stats, relationships, timing = (
-        run_full_diagnosis(
+        run_diagnosis_with_context(
             community_path,
             full_scan=(mode == "full"),
+            state_dir=args.state_dir,
             with_relationships=not args.no_relationships,
         )
     )
@@ -419,7 +489,7 @@ def main(argv=None):
             relationships=relationships,
         )
         output_path = save_json_report(document, args.json)
-        print(f"\nJSON 报告已保存：{output_path}")
+        print(tr("report.json_saved", path=output_path))
 
     return 0
 

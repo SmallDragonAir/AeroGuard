@@ -19,6 +19,7 @@
 """
 
 import os
+import re
 
 
 #: language code -> {"key": (zh, en)} 之外，另有按 (key, lang) 的二维表：
@@ -47,6 +48,16 @@ _register("gui.lang.en", "English", "English")
 _register("gui.lang.busy",
           "任务运行中无法切换语言，请等待完成。",
           "Language cannot be switched while a task is running.")
+_register("gui.lang.rescan_title", "切换结果语言", "Switch result language")
+_register("gui.lang.rescan_text",
+          "已载入的结果是用之前的语言生成的。是否立即重新扫描，"
+          "让问题说明显示为新语言？",
+          "Loaded results were generated in the previous language. "
+          "Re-scan now so that messages appear in the new language?")
+_register("gui.lang.declined_note",
+          "已切换界面语言；已载入结果保持原语言，重新扫描后可显示新语言。",
+          "UI language switched; loaded results keep the previous language "
+          "until you re-scan.")
 _register("gui.button.browse", "浏览…", "Browse...")
 _register("gui.button.start_scan", "开始扫描", "Start scan")
 _register("gui.button.export_json", "导出 JSON", "Export JSON")
@@ -92,6 +103,9 @@ _register("gui.head.addons", "插件", "Add-ons")
 _register("gui.head.issues", "问题", "Issues")
 _register("gui.head.conflicts", "资源重叠", "Overlaps")
 _register("gui.head.error", "异常", "Error")
+_register("gui.head.notes", "备注", "Notes")
+_register("gui.search.label", "筛选：", "Filter:")
+_register("gui.search.clear", "清除", "Clear")
 
 _register("gui.action.refresh_inventory", "刷新清单", "Refresh list")
 _register("gui.action.enable", "启用", "Enable")
@@ -362,6 +376,246 @@ _register("rel.cycle.exists", "当前扫描根目录内存在循环依赖",
           "A circular dependency exists within the current scan root")
 
 
+# --------------------------------------------------------------------------
+# CLI 前缀 / 文本报告 / 启动器
+# --------------------------------------------------------------------------
+_register("cli.manage_failed", "管理操作失败：{error}",
+          "Management failed: {error}")
+_register("cli.history_failed", "历史操作失败：{error}",
+          "History failed: {error}")
+_register("cli.compare_summary",
+          "基线比较 {name}: 共 {changes} 项变化（{detail}）；兼容性提示 {warnings} 条",
+          "Baseline comparison {name}: {changes} change(s) ({detail}); "
+          "{warnings} compatibility warning(s)")
+_register("cli.compare_no_diff", "无差异", "no changes")
+_register("cli.count_items", "{n} 项", "{n} item(s)")
+
+_register("report.community_path", "Community 路径：{path}",
+          "Community path: {path}")
+_register("report.scan_mode", "扫描模式：{mode}", "Scan mode: {mode}")
+_register("report.mode_full", "完整扫描", "full scan")
+_register("report.mode_quick", "快速扫描", "quick scan")
+_register("report.addons", "插件总数：{n}", "Add-ons: {n}")
+_register("report.scan_errors", "扫描异常：{n}", "Scan errors: {n}")
+_register("report.issues", "检测问题：{n}", "Findings: {n}")
+_register("report.downgraded", "自动降噪：{n} 条问题 / {affected} 个项目",
+          "Noise-reduced: {n} finding(s) / {affected} item(s)")
+_register("report.resource_conflicts", "资源冲突候选：{n}",
+          "Resource-conflict candidates: {n}")
+_register("report.airport_conflicts", "机场重复候选：{n}",
+          "Airport-duplicate candidates: {n}")
+_register("report.declared_dependencies", "声明依赖：{n}",
+          "Declared dependencies: {n}")
+_register("report.by_rule", "\n按规则：", "\nBy rule:")
+_register("report.rule_line", "  {rule}: {packages} 个插件{affected}",
+          "  {rule}: {packages} add-on(s){affected}")
+_register("report.rule_affected", " / {n} 个项目", " / {n} item(s)")
+_register("report.top_issues", "\n=== 异常数量 TOP 10 ===",
+          "\n=== Top 10 by finding count ===")
+_register("report.by_package", "\n=== 按插件汇总 ===",
+          "\n=== Summary by add-on ===")
+_register("report.issue_line", "  [{severity}] {rule} - {message}{suffix}",
+          "  [{severity}] {rule} - {message}{suffix}")
+_register("report.issue_suffix", "（影响 {n} 项）", " ({n} item(s))")
+_register("report.downgrade_note",
+          "    已降级：{reason}（抽样 {n} 项）",
+          "    Downgraded: {reason} (sampled {n})")
+_register("report.missing_detail", "\n=== 缺失文件详情 ===",
+          "\n=== Missing-file details ===")
+_register("report.missing_for", "\n插件：{package}（{n} 项缺失）",
+          "\nAdd-on: {package} ({n} missing)")
+_register("report.missing_item", "  缺失：{path}", "  missing: {path}")
+_register("report.missing_more", "  … 另有 {n} 项未显示，可用 --json 查看完整明细",
+          "  ... {n} more not shown; use --json for full details")
+_register("report.review_top", "\n=== 重点复核 TOP 10 ===",
+          "\n=== Priority review TOP 10 ===")
+_register("report.review_line",
+          "{package} | ERROR {error} | WARNING {warning} | INFO {info} | 影响 {affected} 项",
+          "{package} | ERROR {error} | WARNING {warning} | INFO {info} | "
+          "{affected} item(s)")
+_register("report.missing_review", "\n=== 缺失文件重点复核 ===",
+          "\n=== Missing files by impact ===")
+_register("report.missing_review_line", "{package} | {impact} | 影响 {n} 项",
+          "{package} | {impact} | {n} item(s)")
+_register("report.rel_conflicts", "\n=== Package 资源冲突 TOP 10 ===",
+          "\n=== Package resource conflicts TOP 10 ===")
+_register("report.rel_conflict_line", "[{severity}] {path} | {packages}",
+          "[{severity}] {path} | {packages}")
+_register("report.judgement", "  判断：{reason}", "  Reason: {reason}")
+_register("report.default_priority", "  默认优先：{package}（{basis}）",
+          "  Default priority: {package} ({basis})")
+_register("report.airports", "\n=== 机场重复 / 覆盖候选 ===",
+          "\n=== Airport duplicates / override candidates ===")
+_register("report.airports_none", "未发现高置信度的 Community 内机场重复候选。",
+          "No high-confidence airport-duplicate candidates found.")
+_register("report.deps", "\n=== 插件依赖分析 ===",
+          "\n=== Add-on dependency analysis ===")
+_register("report.deps_resolved", "当前根目录内已解析：{n}",
+          "Resolved in the scan root: {n}")
+_register("report.deps_outside", "扫描范围外未解析：{n}",
+          "Unresolved (outside scan scope): {n}")
+_register("report.deps_invalid", "无效依赖条目：{n}", "Invalid dependency entries: {n}")
+_register("report.deps_cycles", "依赖环：{n}", "Dependency cycles: {n}")
+_register("report.scan_error_detail", "\n=== 扫描错误 ===", "\n=== Scan errors ===")
+_register("report.scan_error_for", "\n插件：{package}", "\nAdd-on: {package}")
+_register("report.scan_error_path", "  路径：{path}", "  path: {path}")
+_register("report.scan_error_text", "  错误：{error}", "  error: {error}")
+_register("report.performance", "\n=== 性能统计 ===", "\n=== Performance ===")
+_register("report.perf_line", "{label}：{value} 秒", "{label}: {value} s")
+_register("report.perf_total", "总耗时：{value} 秒", "Total: {value} s")
+_register("report.perf_noise_label", "降噪规则", "Noise filter")
+_register("report.perf_relationships_label", "关系分析",
+          "Relationship analysis")
+_register("report.perf_internal", "  Analyzer 内部：", "  Analyzer internals:")
+_register("report.perf_layout", "    Layout 解析：{value} 秒",
+          "    Layout parsing: {value} s")
+_register("report.perf_declared", "    声明文件检查：{value} 秒",
+          "    Declared-file checks: {value} s")
+_register("report.perf_tree", "    文件树遍历：{value} 秒",
+          "    File-tree walk: {value} s")
+_register("report.perf_tree_parallel",
+          "    文件树遍历（线程累计 / 墙钟）：{total} 秒 / {wall} 秒",
+          "    File-tree walk (thread total / wall): {total} s / {wall} s")
+_register("report.perf_hotspots", "  文件树遍历热点 TOP 5：",
+          "  File-tree hot spots TOP 5:")
+_register("report.perf_hotspot_line", "    {package}：{seconds:.2f} 秒 / {files} 个文件",
+          "    {package}: {seconds:.2f} s / {files} file(s)")
+_register("report.json_saved", "\nJSON 报告已保存：{path}",
+          "\nJSON report saved: {path}")
+_register("report.path_missing", "路径不存在，请检查输入的路径是否正确。",
+          "Path does not exist; please check the entered path.")
+_register("report.path_not_dir", "输入的路径不是一个目录。",
+          "The entered path is not a folder.")
+_register("report.prompt_path", "请输入 MSFS Community 文件夹路径：",
+          "Enter the MSFS Community folder path: ")
+_register("report.prompt_mode", "扫描模式[1=快速扫描/2=完整扫描]：",
+          "Scan mode [1=quick / 2=full]: ")
+_register("report.eof_hint",
+          "没有可用的交互输入（标准输入已关闭）；请使用非交互参数：\n"
+          "  python main.py <Community 路径> --mode quick|full [--json]",
+          "No interactive input available (stdin is closed); use "
+          "non-interactive arguments instead:\n"
+          "  python main.py <Community path> --mode quick|full [--json]")
+
+_register("launcher.usage", """AeroGuard —— MSFS 插件诊断与管理（单文件版）
+用法：
+  AeroGuard.exe                        启动桌面界面（无参数，双击）
+  AeroGuard.exe gui                    同上
+  AeroGuard.exe scan <Community> [--mode quick|full] [--json] [--no-relationships]
+  AeroGuard.exe manage <Community> <子命令> ...
+  AeroGuard.exe history <Community> <子命令> ...
+
+提示：也可以直接运行 python main.py / manage.py / history_cli.py。""",
+          """AeroGuard - MSFS add-on diagnostics & management (single file)
+
+Usage:
+  AeroGuard.exe                        open the desktop UI (no arguments / double-click)
+  AeroGuard.exe gui                    same as above
+  AeroGuard.exe scan <Community> [--mode quick|full] [--json] [--no-relationships]
+  AeroGuard.exe manage <Community> <command> ...
+  AeroGuard.exe history <Community> <command> ...
+
+Tip: you can also run python main.py / manage.py / history_cli.py directly.""")
+
+
+_register("help.main.description",
+          "AeroGuard —— MSFS 插件一致性诊断工具（开发版 CLI）。",
+          "AeroGuard - MSFS package consistency diagnostics (dev CLI).")
+_register("help.main.community",
+          "MSFS Community 文件夹路径（缺省时交互输入）",
+          "Path to the MSFS Community folder (prompted if omitted)")
+_register("help.main.mode",
+          "扫描模式：quick=快速扫描，full=完整扫描（缺省时交互选择）",
+          "Scan mode: quick or full (prompted if omitted)")
+_register("help.main.json",
+          "同时把完整报告写入 JSON 文件；不写 PATH 时自动保存到 reports/ 目录",
+          "Also write the full report to a JSON file; without PATH it is "
+          "saved under reports/")
+_register("help.main.no_relationships",
+          "跳过跨 Package 冲突/依赖分析（快速扫描可明显提速）",
+          "Skip cross-package conflict/dependency analysis (faster quick scans)")
+_register("help.main.state_dir",
+          "知识状态目录；缺省使用 Community 同级的 .aeroguard",
+          "Knowledge state directory; defaults to .aeroguard next to the "
+          "Community")
+_register("help.main.epilog",
+          "示例：\n"
+          "  python main.py\n"
+          "  python main.py D:\\MSFS2024_DATA\\Community --mode full\n"
+          "  python main.py <路径> --mode quick --json\n",
+          "Examples:\n"
+          "  python main.py\n"
+          "  python main.py D:\\MSFS2024_DATA\\Community --mode full\n"
+          "  python main.py <path> --mode quick --json\n")
+
+_register("help.manage.description",
+          "AeroGuard 插件管理（只操作指定 Community 与管理状态目录）。",
+          "AeroGuard add-on management (operates only on the given Community "
+          "and state directory).")
+_register("help.manage.community", "Community 或 Community2024 路径",
+          "Path to Community or Community2024")
+_register("help.manage.state_dir",
+          "管理状态目录；默认使用 Community 同级的 .aeroguard",
+          "Management state directory; defaults to .aeroguard next to the "
+          "Community")
+_register("help.manage.inventory", "列出启用、禁用与隔离包",
+          "List enabled, disabled, and quarantined packages")
+_register("help.manage.versions", "列出当前与已归档版本",
+          "List current and archived versions")
+_register("help.manage.disable", "禁用一个包", "Disable a package")
+_register("help.manage.enable", "启用一个包", "Enable a package")
+_register("help.manage.restore", "从隔离区恢复一个包",
+          "Restore a package from quarantine")
+_register("help.manage.quarantine", "把包移入安全隔离区",
+          "Move a package into the safe quarantine area")
+_register("help.manage.profile_save", "保存当前启用状态",
+          "Save the current enabled/disabled states")
+_register("help.manage.profile_apply", "应用已保存的 Profile",
+          "Apply a saved Profile")
+_register("help.manage.check", "只读检查目录或 ZIP 安装源",
+          "Read-only inspection of a folder or ZIP install source")
+_register("help.manage.install", "检查后安装并保留旧版本",
+          "Inspect, install, and keep the previous version")
+_register("help.manage.rollback", "回滚一个已提交的安装事务",
+          "Roll back a committed install transaction")
+_register("help.manage.note_list", "列出本地已知结论记录（已知异常数据库雏形）",
+          "List local knowledge records (seed of a known-issue database)")
+_register("help.manage.note_add", "记录一条针对插件/规则的本地已知结论",
+          "Record a local knowledge note for an add-on / rule")
+_register("help.manage.note_text", "结论文本", "Note text")
+_register("help.manage.note_rule",
+          "可选的规则 ID（如 LAYOUT_FILE_SIZE_MISMATCH）",
+          "Optional rule ID (e.g. LAYOUT_FILE_SIZE_MISMATCH)")
+_register("help.manage.note_remove", "删除一条本地已知结论",
+          "Delete a local knowledge record")
+_register("help.manage.override_list", "列出本地规则覆盖（忽略 / 降级）",
+          "List local rule overrides (ignore / downgrade)")
+_register("help.manage.override_add", "为某插件的某条规则添加忽略或降级",
+          "Add an ignore/downgrade override for a rule of an add-on")
+_register("help.manage.override_rule", "规则 ID，如 LAYOUT_FILE_MISSING",
+          "Rule ID, e.g. LAYOUT_FILE_MISSING")
+_register("help.manage.override_remove", "删除一条规则覆盖",
+          "Delete a rule override")
+
+_register("help.history.description",
+          "记录紧凑扫描历史并与命名环境基线比较。",
+          "Record compact scan history and compare against named baselines.")
+_register("help.history.record", "扫描并保存紧凑快照",
+          "Scan and save a compact snapshot")
+_register("help.history.list", "列出历史快照", "List history snapshots")
+_register("help.history.baseline_set", "把历史快照设为命名基线",
+          "Set a history snapshot as a named baseline")
+_register("help.history.compare", "重新扫描并与命名基线比较",
+          "Re-scan and compare against a named baseline")
+
+_register("help.gui.description", "启动 AeroGuard 原生桌面界面。",
+          "Launch the native AeroGuard desktop UI.")
+_register("help.gui.lang",
+          "界面语言（缺省按系统语言；也可用环境变量 AEROGUARD_LANG）",
+          "UI language (defaults to the OS language; AEROGUARD_LANG also "
+          "works)")
+
+
 def resolve_language(override=None):
     """按优先级解析语言代码，返回 'zh' 或 'en'。"""
     if override:
@@ -420,3 +674,206 @@ def tr(key, **kwargs):
     if kwargs:
         return text.format(**kwargs)
     return text
+
+
+# --------------------------------------------------------------------------
+# 运行期消息的边界本地化
+#
+# 管理 / 历史 / 结论 / 覆盖等模块的异常与警告文案以中文模板产生；
+# 为避免在领域模块里散落 i18n 调用，这里集中维护"中文模板 → 英文模板"
+# 的映射，并在显示边界（GUI 弹窗、CLI 前缀、JSON 详情）调用
+# localize_text / localize_document 完成转换。仅英文语言生效。
+# --------------------------------------------------------------------------
+_MESSAGE_TEMPLATES = (
+    # --- 通用标签型 ---
+    (r"(?P<label>.+)必须是字符串", "{label} must be a string"),
+    (r"(?P<label>.+)不能为空", "{label} must not be empty"),
+    (r"(?P<label>.+)不能超过 128 个字符",
+     "{label} must not exceed 128 characters"),
+    (r"(?P<label>.+)包含 Windows 路径非法字符",
+     "{label} contains characters that are invalid in Windows paths"),
+    (r"(?P<label>.+)包含控制字符", "{label} contains control characters"),
+    (r"(?P<label>.+)不能以空格或句点结尾",
+     "{label} must not end with a space or period"),
+    (r"(?P<label>.+)不是安全文件名", "{label} is not a safe file name"),
+    (r"(?P<label>.+)无法读取：(?P<error>.+)", "Failed to read {label}: {error}"),
+    (r"(?P<label>.+)顶层必须是 JSON 对象",
+     "{label} must be a JSON object"),
+    (r"(?P<label>.+)不是有效的 JSON：(?P<error>.+)",
+     "{label} is not valid JSON: {error}"),
+    # --- 路径 / 状态目录 ---
+    (r"Community 路径不存在或不是目录：(?P<path>.+)",
+     "Community path does not exist or is not a folder: {path}"),
+    (r"无法检查路径：(?P<path>.+)：(?P<error>.+)",
+     "Cannot inspect path {path}: {error}"),
+    (r"安装源包含链接或重解析点：(?P<path>.+)",
+     "Install source contains a link or reparse point: {path}"),
+    (r"拒绝清理非暂存目录：(?P<path>.+)",
+     "Refusing to clean a non-staging directory: {path}"),
+    (r"管理状态目录必须位于 Community 目录之外",
+     "The management state directory must be outside the Community folder"),
+    (r"状态目录必须位于 Community 之外",
+     "The state directory must be outside the Community"),
+    (r"历史状态目录必须位于 Community 之外",
+     "The history state directory must be outside the Community"),
+    # --- ZIP 安全校验 ---
+    (r"ZIP 条目过多：(?P<n>\d+)，上限 (?P<limit>\d+)",
+     "Too many ZIP entries: {n} (limit {limit})"),
+    (r"ZIP 包含不安全路径：(?P<name>.+)",
+     "ZIP contains an unsafe path: {name}"),
+    (r"ZIP 包含 Windows 非法路径：(?P<name>.+)",
+     "ZIP contains a Windows-invalid path: {name}"),
+    (r"ZIP 包含加密条目：(?P<name>.+)",
+     "ZIP contains an encrypted entry: {name}"),
+    (r"ZIP 包含符号链接：(?P<name>.+)",
+     "ZIP contains a symbolic link: {name}"),
+    (r"ZIP 包含重复路径：(?P<name>.+)",
+     "ZIP contains a duplicate path: {name}"),
+    (r"ZIP 解压后总大小超过 100 GiB 安全上限",
+     "ZIP uncompressed size exceeds the 100 GiB safety limit"),
+    (r"ZIP 无法解析：(?P<error>.+)", "ZIP could not be parsed: {error}"),
+    # --- 安装源 ---
+    (r"安装源必须是包目录、包集合目录或 ZIP 文件",
+     "Install source must be a package folder, a collection folder, "
+     "or a ZIP file"),
+    (r"安装源中未找到同时包含 manifest\.json 与 layout\.json 的包目录",
+     "No package folder containing both manifest.json and layout.json "
+     "was found in the install source"),
+    (r"ZIP 中未找到同时包含 manifest\.json 与 layout\.json 的包目录",
+     "No package folder containing both manifest.json and layout.json "
+     "was found in the ZIP"),
+    (r"安装源包含重复包目录名：(?P<name>.+)",
+     "Install source contains a duplicate package folder name: {name}"),
+    (r"(?P<name>.+)/layout\.json 的 content 不是列表",
+     "{name}/layout.json content is not a list"),
+    # --- 包清单 / 管理操作 ---
+    (r"发现多个大小写等价的包目录：(?P<name>.+)",
+     "Multiple case-equivalent package folders found: {name}"),
+    (r"目标已存在，拒绝覆盖：(?P<path>.+)",
+     "Destination already exists; refusing to overwrite: {path}"),
+    (r"未找到包：(?P<name>.+)", "Package not found: {name}"),
+    (r"目标位置已有同名包：(?P<path>.+)",
+     "Destination already has a package with the same name: {path}"),
+    (r"未找到可隔离的包：(?P<name>.+)",
+     "No package available to quarantine: {name}"),
+    (r"隔离区已有同名包：(?P<name>.+)",
+     "The quarantine area already has a package with the same name: {name}"),
+    (r"隔离记录已存在：(?P<path>.+)",
+     "Quarantine record already exists: {path}"),
+    (r"隔离区未找到包：(?P<name>.+)",
+     "Package not found in the quarantine area: {name}"),
+    (r"隔离记录中的 previous_status 无效",
+     "The quarantine record has an invalid previous_status"),
+    (r"恢复位置已有同名包：(?P<name>.+)",
+     "The restore destination already has a package with the same name: "
+     "{name}"),
+    (r"存在跨位置同名包，无法保存确定性 Profile",
+     "A package name exists in multiple locations; cannot save a "
+     "deterministic Profile"),
+    (r"Profile 已存在：(?P<path>.+)；使用 --replace 显式更新",
+     "Profile already exists: {path}; use --replace to update explicitly"),
+    (r"Profile packages 必须是 JSON 对象",
+     "Profile packages must be a JSON object"),
+    (r"Profile 中 (?P<name>.+) 的状态无效",
+     "Profile has an invalid state for {name}"),
+    (r"包同时存在于启用和禁用位置：(?P<name>.+)",
+     "Package exists in both enabled and disabled locations: {name}"),
+    (r"Profile 目标已存在：(?P<path>.+)",
+     "Profile destination already exists: {path}"),
+    (r"安装前检查未通过，未修改 Community",
+     "Pre-install check failed; the Community was not modified"),
+    (r"禁用区已有同名包：(?P<name>.+)",
+     "The disabled area already has a package with the same name: {name}"),
+    (r"Community 中已有同名非目录项：(?P<path>.+)",
+     "The Community already contains a non-folder item with the same "
+     "name: {path}"),
+    # --- 回滚 ---
+    (r"指定事务不是安装事务",
+     "The given transaction is not an install transaction"),
+    (r"安装事务当前状态不可回滚：(?P<status>.+)",
+     "The install transaction cannot be rolled back in its current "
+     "state: {status}"),
+    (r"安装事务属于另一个 Community 路径",
+     "The install transaction belongs to a different Community path"),
+    (r"安装事务没有可回滚的包",
+     "The install transaction has no packages to roll back"),
+    (r"当前 Community 中未找到已安装包：(?P<name>.+)",
+     "Installed package not found in the current Community: {name}"),
+    (r"包 (?P<name>.+) 的 manifest/layout 在安装后已变化，拒绝覆盖",
+     "manifest/layout of {name} changed after installation; refusing to "
+     "overwrite"),
+    (r"安装事务中的备份路径无效：(?P<path>.+)",
+     "Invalid backup path in the install transaction: {path}"),
+    (r"原版本备份不存在：(?P<path>.+)",
+     "The previous-version backup does not exist: {path}"),
+    (r"回滚保留目录已存在：(?P<path>.+)",
+     "The rollback retention directory already exists: {path}"),
+    # --- 依赖 / Profile 警告 ---
+    (r"启用包声明依赖即将离开 Community 的包",
+     "An enabled package declares a dependency on a package that is "
+     "about to leave the Community"),
+    (r"Profile 中的包当前未安装",
+     "The package in this Profile is not currently installed"),
+    # --- 历史 / 基线 ---
+    (r"报告必须是 JSON 对象", "The report must be a JSON object"),
+    (r"基线和当前快照必须是 JSON 对象",
+     "The baseline and the current snapshot must be JSON objects"),
+    (r"扫描模式不同，文件一致性问题变化不可直接比较",
+     "Scan modes differ; file-consistency changes cannot be compared "
+     "directly"),
+    (r"Community 路径不同，结果可能属于不同环境",
+     "Community paths differ; results may belong to different "
+     "environments"),
+    (r"基线已存在：(?P<path>.+)；使用 --replace 显式更新",
+     "Baseline already exists: {path}; use --replace to update explicitly"),
+    (r"没有可用扫描快照，请先执行 record",
+     "No scan snapshot available; run record first"),
+    # --- 结论记录 ---
+    (r"包名无效：(?P<name>.+)", "Invalid package name: {name}"),
+    (r"结论记录文件中的 notes 必须是列表",
+     "notes in the knowledge-record file must be a list"),
+    (r"结论文本不能为空", "Note text must not be empty"),
+    (r"结论文本过长（(?P<n>\d+) > (?P<limit>\d+)）",
+     "Note text is too long ({n} > {limit})"),
+    (r"rule_id 无效或过长", "rule_id is invalid or too long"),
+    (r"note id 无效", "Invalid note id"),
+    (r"未找到结论记录：(?P<id>.+)", "Knowledge record not found: {id}"),
+    # --- 规则覆盖 ---
+    (r"rule_id 缺失或过长", "rule_id is missing or too long"),
+    (r"覆盖记录文件中的 overrides 必须是列表",
+     "overrides in the override-record file must be a list"),
+    (r"action 必须是其中之一：(?P<actions>.+)",
+     "action must be one of: {actions}"),
+    (r"reason 无效或过长", "reason is invalid or too long"),
+    (r"同一 \(包, 规则\) 已有覆盖：(?P<package>.+) / (?P<rule>.+)",
+     "An override already exists for (package, rule): {package} / {rule}"),
+    (r"override id 无效", "Invalid override id"),
+    (r"未找到覆盖记录：(?P<id>.+)", "Override record not found: {id}"),
+)
+
+
+def localize_text(text):
+    """把运行期中文消息模板转换为当前语言；未命中时原样返回。"""
+    if current_language() != "en" or not isinstance(text, str):
+        return text
+    for pattern, template in _MESSAGE_TEMPLATES:
+        match = re.fullmatch(pattern, text)
+        if match is not None:
+            return template.format(**match.groupdict())
+    return text
+
+
+def localize_document(value):
+    """递归本地化文档中的字符串（用于详情窗口 / JSON 警告列表）。"""
+    if current_language() != "en":
+        return value
+    if isinstance(value, str):
+        return localize_text(value)
+    if isinstance(value, list):
+        return [localize_document(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: localize_document(item)
+            for key, item in value.items()
+        }
+    return value

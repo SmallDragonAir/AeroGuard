@@ -10,8 +10,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from i18n import current_language, set_language, tr
-from main import run_full_diagnosis, save_json_report
+from i18n import (
+    current_language,
+    localize_document,
+    localize_text,
+    set_language,
+    tr,
+)
+from main import run_diagnosis_with_context, save_json_report
 from history import HistoryError, HistoryStore
 from management import AddonManager, ManagementError
 from report import build_report
@@ -54,7 +60,7 @@ class DesktopScanResult:
         )
 
 
-def run_desktop_scan(community_path, mode):
+def run_desktop_scan(community_path, mode, state_dir=None):
     """运行一次供 GUI 使用的完整诊断流程（与 CLI 共用同一实现）。"""
     path = Path(community_path).expanduser().resolve()
     if not path.is_dir():
@@ -63,7 +69,9 @@ def run_desktop_scan(community_path, mode):
         raise ValueError(tr("gui.err.bad_mode", mode=mode))
 
     addons, scan_errors, issues, stats, relationships, timing = (
-        run_full_diagnosis(path, full_scan=(mode == "full"))
+        run_diagnosis_with_context(
+            path, full_scan=(mode == "full"), state_dir=state_dir
+        )
     )
     return DesktopScanResult(
         community_path=path,
@@ -96,6 +104,75 @@ def diagnostic_summary(result):
     }
 
 
+def _notes_snippet(issue):
+    """问题明细中展示用的备注缩写（取第一条已知结论）。"""
+    notes = issue.get("notes") or []
+    if not notes:
+        return ""
+    text = str(notes[0].get("text") or "").strip()
+    if not text:
+        return ""
+    return text if len(text) <= 60 else text[:57] + "..."
+
+
+# 行级配色标签（ttk.Treeview tag）
+SEVERITY_TAG_COLORS = {
+    "tag_error": "#c62828",
+    "tag_warning": "#b26a00",
+    "tag_info": "#1a56db",
+    "tag_downgraded": "#0e7490",
+}
+
+
+def issue_row_tag(issue):
+    """按严重等级与降级状态选择行标签。"""
+    if issue.get("override") or issue.get("original_severity"):
+        return "tag_downgraded"
+    severity = issue.get("severity")
+    if severity == "error":
+        return "tag_error"
+    if severity == "warning":
+        return "tag_warning"
+    return "tag_info"
+
+
+def conflict_row_tag(conflict):
+    if conflict.get("severity") == "warning":
+        return "tag_warning"
+    if conflict.get("severity") == "error":
+        return "tag_error"
+    return "tag_info"
+
+
+def _value_sort_key(value):
+    """排序键：数字按数值、其余按字符串不区分大小写。"""
+    if isinstance(value, bool):
+        return (0, int(value), "")
+    if isinstance(value, (int, float)):
+        return (0, value, "")
+    return (1, 0, str(value).casefold())
+
+
+def sort_rows(rows, column, reverse=False):
+    """按 values 中第 column 列排序行列表。"""
+    return sorted(
+        rows,
+        key=lambda row: _value_sort_key(row["values"][column]),
+        reverse=reverse,
+    )
+
+
+def filter_rows(rows, query):
+    """按查询文本过滤行；空查询返回原列表。"""
+    query = (query or "").strip().casefold()
+    if not query:
+        return rows
+    return [
+        row for row in rows
+        if query in " ".join(str(value) for value in row["values"]).casefold()
+    ]
+
+
 def issue_table_rows(issues):
     ordered = sorted(
         issues,
@@ -115,6 +192,7 @@ def issue_table_rows(issues):
                 issue.get("affected_count", 1),
                 issue.get("impact", "unknown").upper(),
                 issue.get("message", ""),
+                _notes_snippet(issue),
             ),
             "detail": issue,
         }
@@ -296,9 +374,26 @@ class AeroGuardApp:
             ).pack()
             frame.columnconfigure(column, weight=1)
 
-    def _tree_tab(self, notebook, title, columns, widths):
+    def _tree_tab(self, notebook, title, columns, widths, filterable=False):
         frame = ttk.Frame(notebook, padding=8)
         notebook.add(frame, text=title)
+
+        filter_var = None
+        if filterable:
+            filter_var = tk.StringVar()
+            filter_bar = ttk.Frame(frame)
+            filter_bar.grid(row=0, column=0, columnspan=2,
+                            sticky="ew", pady=(0, 6))
+            ttk.Label(filter_bar, text=tr("gui.search.label")).pack(
+                side="left"
+            )
+            entry = ttk.Entry(filter_bar, textvariable=filter_var)
+            entry.pack(side="left", fill="x", expand=True, padx=(6, 6))
+            ttk.Button(
+                filter_bar, text=tr("gui.search.clear"),
+                command=lambda: filter_var.set(""),
+            ).pack(side="left")
+
         tree = ttk.Treeview(
             frame,
             columns=tuple(columns),
@@ -308,13 +403,37 @@ class AeroGuardApp:
         y_scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
         x_scroll = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)
         tree.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
-        tree.grid(row=0, column=0, sticky="nsew")
-        y_scroll.grid(row=0, column=1, sticky="ns")
-        x_scroll.grid(row=1, column=0, sticky="ew")
-        frame.rowconfigure(0, weight=1)
+
+        top_row = 1 if filterable else 0
+        tree.grid(row=top_row, column=0, sticky="nsew")
+        y_scroll.grid(row=top_row, column=1, sticky="ns")
+        x_scroll.grid(row=top_row + 1, column=0, sticky="ew")
+        frame.rowconfigure(top_row, weight=1)
         frame.columnconfigure(0, weight=1)
-        for column, heading in columns.items():
-            tree.heading(column, text=heading)
+
+        for tag_name, color in SEVERITY_TAG_COLORS.items():
+            tree.tag_configure(tag_name, foreground=color)
+
+        columns_order = list(columns)
+        tree._ag_columns = columns_order
+        tree._ag_all_rows = []
+        tree._ag_filter_var = filter_var
+        tree._ag_sort = None
+        if filter_var is not None:
+            entry.bind(
+                "<KeyRelease>",
+                lambda event, t=tree: self._apply_tree_filter(t),
+            )
+            filter_var.trace_add(
+                "write",
+                lambda *args, t=tree: self._apply_tree_filter(t),
+            )
+
+        for index, (column, heading) in enumerate(columns.items()):
+            tree.heading(
+                column, text=heading,
+                command=lambda c=column, t=tree: self._toggle_tree_sort(t, c),
+            )
             tree.column(column, width=widths.get(column, 120), minwidth=70)
         return frame, tree
 
@@ -330,11 +449,13 @@ class AeroGuardApp:
                 "package": tr("gui.head.package"),
                 "affected": tr("gui.head.affected"),
                 "impact": tr("gui.head.impact"), "message": tr("gui.head.message"),
+                "notes": tr("gui.head.notes"),
             },
             {
                 "severity": 80, "rule": 190, "package": 230,
-                "affected": 65, "impact": 155, "message": 420,
+                "affected": 65, "impact": 155, "message": 380, "notes": 220,
             },
+            filterable=True,
         )
         self.issue_tree.bind("<Double-1>", self._show_selected_detail)
 
@@ -351,6 +472,7 @@ class AeroGuardApp:
                 "type": 80, "severity": 80, "resource": 300,
                 "packages": 380, "reason": 360,
             },
+            filterable=True,
         )
         self.conflict_tree.bind("<Double-1>", self._show_selected_detail)
 
@@ -469,7 +591,11 @@ class AeroGuardApp:
         self.root.destroy()
 
     def _on_language_change(self, event=None):
-        """头部语言下拉框切换：即时重建界面文案并保留已有数据。"""
+        """头部语言下拉框切换：即时重建界面文案。
+
+        已载入的检测说明是在扫描时生成的语言；切换语言时询问是否
+        重新扫描，让说明（message / reason）也切换为新语言。
+        """
         code = _lang_code_from_display(self.lang_var.get())
         if code == current_language():
             return
@@ -479,10 +605,37 @@ class AeroGuardApp:
             return
         set_language(code)
         self.lang_var.set(_lang_display_name())
+
+        result = self.result
+        if result is not None:
+            rescan = messagebox.askyesno(
+                tr("gui.lang.rescan_title"),
+                tr("gui.lang.rescan_text"),
+                parent=self.root,
+            )
+            if rescan:
+                path = result.community_path
+                mode = result.mode
+                self._rebuild_ui(restore_data=False)
+                label = (
+                    tr("gui.status.scan_full") if mode == "full"
+                    else tr("gui.status.scan_quick")
+                )
+                self._run_async(
+                    label,
+                    lambda: run_desktop_scan(path, mode, self.state_dir),
+                    self._receive_scan,
+                )
+                return
+            self.status_var.set(tr("gui.lang.declined_note"))
         self._rebuild_ui()
 
-    def _rebuild_ui(self):
-        """按当前语言重建静态界面；已加载的扫描/清单/历史数据保持不变。"""
+    def _rebuild_ui(self, restore_data=True):
+        """按当前语言重建静态界面。
+
+        restore_data=True 时用已载入数据重填各页签；
+        为 False（即将重新扫描）时只重建界面框架。
+        """
         result = self.result
         for child in list(self.root.winfo_children()):
             child.destroy()
@@ -494,6 +647,9 @@ class AeroGuardApp:
         self._build_summary()
         self._build_tabs()
         self._build_status_bar()
+
+        if not restore_data:
+            return
 
         if result is not None:
             # 会重填问题/冲突/异常页签，并异步刷新管理清单
@@ -536,7 +692,7 @@ class AeroGuardApp:
         if not succeeded:
             self.status_var.set(tr("gui.err.task_failed"))
             messagebox.showerror(
-                tr("gui.dialog.close_busy_title"), str(payload), parent=self.root
+                tr("gui.dialog.close_busy_title"), localize_text(str(payload)), parent=self.root
             )
             return
         try:
@@ -544,21 +700,21 @@ class AeroGuardApp:
         except Exception as error:
             self.status_var.set(tr("gui.err.render_failed"))
             messagebox.showerror(
-                tr("gui.dialog.close_busy_title"), str(error), parent=self.root
+                tr("gui.dialog.close_busy_title"), localize_text(str(error)), parent=self.root
             )
 
     def _start_scan(self):
         try:
             path = self._community_path()
         except ValueError as error:
-            messagebox.showerror("AeroGuard", str(error), parent=self.root)
+            messagebox.showerror("AeroGuard", localize_text(str(error)), parent=self.root)
             return
         mode = self.mode_var.get()
         label = tr("gui.status.scan_full") if mode == "full" \
             else tr("gui.status.scan_quick")
         self._run_async(
             label,
-            lambda: run_desktop_scan(path, mode),
+            lambda: run_desktop_scan(path, mode, self.state_dir),
             self._receive_scan,
         )
 
@@ -567,25 +723,60 @@ class AeroGuardApp:
         for item in tree.get_children():
             tree.delete(item)
 
-    def _fill_detail_tree(self, tree, rows):
+    def _fill_detail_tree(self, tree, rows, tag_fn=None):
         self._clear_tree(tree)
         for item_id in list(self._detail_by_item):
             if item_id.startswith(str(tree)):
                 del self._detail_by_item[item_id]
         for index, row in enumerate(rows):
             item_id = f"{tree}-{index}"
-            tree.insert("", "end", iid=item_id, values=row["values"])
+            tags = (tag_fn(row["detail"]),) if tag_fn is not None else ()
+            tree.insert(
+                "", "end", iid=item_id, values=row["values"], tags=tags
+            )
             self._detail_by_item[item_id] = row["detail"]
+
+    def _render_tree_rows(self, tree):
+        """按当前筛选与排序重新渲染 issue/conflict 树。"""
+        rows = getattr(tree, "_ag_all_rows", []) or []
+        filter_var = getattr(tree, "_ag_filter_var", None)
+        if filter_var is not None:
+            rows = filter_rows(rows, filter_var.get())
+        sort = getattr(tree, "_ag_sort", None)
+        if sort is not None:
+            column, reverse = sort
+            index = tree._ag_columns.index(column)
+            rows = sort_rows(rows, index, reverse)
+        tag_fn = (
+            issue_row_tag if tree is self.issue_tree
+            else (conflict_row_tag if tree is self.conflict_tree else None)
+        )
+        self._fill_detail_tree(tree, rows, tag_fn=tag_fn)
+
+    def _apply_tree_filter(self, tree):
+        self._render_tree_rows(tree)
+
+    def _toggle_tree_sort(self, tree, column):
+        current = getattr(tree, "_ag_sort", None)
+        if current is not None and current[0] == column:
+            tree._ag_sort = (column, not current[1])
+        else:
+            tree._ag_sort = (column, False)
+        self._render_tree_rows(tree)
 
     def _receive_scan(self, result):
         self.result = result
         summary = diagnostic_summary(result)
         for key, variable in self.summary_vars.items():
             variable.set(summary[key])
-        self._fill_detail_tree(self.issue_tree, issue_table_rows(result.issues))
-        self._fill_detail_tree(
-            self.conflict_tree, conflict_table_rows(result.relationships)
-        )
+        issue_tree = self.issue_tree
+        issue_tree._ag_all_rows = issue_table_rows(result.issues)
+        issue_tree._ag_sort = None
+        self._render_tree_rows(issue_tree)
+        conflict_tree = self.conflict_tree
+        conflict_tree._ag_all_rows = conflict_table_rows(result.relationships)
+        conflict_tree._ag_sort = None
+        self._render_tree_rows(conflict_tree)
         self._set_error_text(result.scan_errors)
         self.export_button.configure(state="normal")
         self.status_var.set(tr(
@@ -618,7 +809,12 @@ class AeroGuardApp:
         x_scroll.grid(row=1, column=0, sticky="ew")
         window.rowconfigure(0, weight=1)
         window.columnconfigure(0, weight=1)
-        text.insert("1.0", json.dumps(document, ensure_ascii=False, indent=2))
+        text.insert(
+            "1.0",
+            json.dumps(
+                localize_document(document), ensure_ascii=False, indent=2
+            ),
+        )
         text.configure(state="disabled")
 
     def _show_selected_detail(self, event):
@@ -650,7 +846,7 @@ class AeroGuardApp:
         try:
             manager = self._manager()
         except (ValueError, ManagementError) as error:
-            self.status_var.set(str(error))
+            self.status_var.set(localize_text(str(error)))
             return
         self._run_async(tr("gui.status.refreshing_inventory"), manager.inventory, self._receive_inventory)
 
@@ -715,7 +911,7 @@ class AeroGuardApp:
             )
         except (ValueError, ManagementError) as error:
             messagebox.showerror(
-                tr("gui.dialog.close_busy_title"), str(error), parent=self.root
+                tr("gui.dialog.close_busy_title"), localize_text(str(error)), parent=self.root
             )
 
     def _receive_management_action(self, transaction):
@@ -737,7 +933,7 @@ class AeroGuardApp:
         try:
             store = self._history_store()
         except (ValueError, HistoryError) as error:
-            self.status_var.set(str(error))
+            self.status_var.set(localize_text(str(error)))
             return
         self._run_async(
             tr("gui.status.reading_history"),
@@ -780,7 +976,7 @@ class AeroGuardApp:
             store = self._history_store()
             report = self._current_report_for_history()
         except (ValueError, HistoryError) as error:
-            messagebox.showerror("AeroGuard", str(error), parent=self.root)
+            messagebox.showerror("AeroGuard", localize_text(str(error)), parent=self.root)
             return
         label = simpledialog.askstring(
             tr("gui.dialog.record_history"), tr("gui.dialog.label_prompt"),
@@ -816,7 +1012,7 @@ class AeroGuardApp:
             store = self._history_store()
         except (ValueError, HistoryError) as error:
             messagebox.showerror(
-                tr("gui.dialog.close_busy_title"), str(error), parent=self.root
+                tr("gui.dialog.close_busy_title"), localize_text(str(error)), parent=self.root
             )
             return
         name = simpledialog.askstring(
@@ -839,7 +1035,7 @@ class AeroGuardApp:
             report = self._current_report_for_history()
         except (ValueError, HistoryError) as error:
             messagebox.showerror(
-                tr("gui.dialog.close_busy_title"), str(error), parent=self.root
+                tr("gui.dialog.close_busy_title"), localize_text(str(error)), parent=self.root
             )
             return
         name = simpledialog.askstring(
@@ -878,7 +1074,7 @@ class AeroGuardApp:
             manager = self._manager()
         except (ValueError, ManagementError) as error:
             messagebox.showerror(
-                tr("gui.dialog.close_busy_title"), str(error), parent=self.root
+                tr("gui.dialog.close_busy_title"), localize_text(str(error)), parent=self.root
             )
             return
         self._run_async(
@@ -900,7 +1096,7 @@ class AeroGuardApp:
             manager = self._manager()
         except (ValueError, ManagementError) as error:
             messagebox.showerror(
-                tr("gui.dialog.close_busy_title"), str(error), parent=self.root
+                tr("gui.dialog.close_busy_title"), localize_text(str(error)), parent=self.root
             )
             return
 
@@ -950,7 +1146,7 @@ class AeroGuardApp:
         try:
             manager = self._manager()
         except (ValueError, ManagementError) as error:
-            messagebox.showerror("AeroGuard", str(error), parent=self.root)
+            messagebox.showerror("AeroGuard", localize_text(str(error)), parent=self.root)
             return
 
         def receive_inspection(inspection):
@@ -1012,7 +1208,7 @@ class AeroGuardApp:
         try:
             manager = self._manager()
         except (ValueError, ManagementError) as error:
-            messagebox.showerror("AeroGuard", str(error), parent=self.root)
+            messagebox.showerror("AeroGuard", localize_text(str(error)), parent=self.root)
             return
         self._run_async(
             tr("gui.status.rollback_running", tid=transaction_id),
@@ -1021,16 +1217,29 @@ class AeroGuardApp:
         )
 
 
+def _preset_language(argv):
+    """在解析参数前，先根据 --lang 预设语言，使 --help 也使用该语言。"""
+    arguments = sys.argv[1:] if argv is None else list(argv)
+    for index, argument in enumerate(arguments):
+        if argument == "--lang" and index + 1 < len(arguments):
+            set_language(arguments[index + 1])
+            return
+        if argument.startswith("--lang="):
+            set_language(argument.split("=", 1)[1])
+            return
+
+
 def parse_args(argv=None):
+    _preset_language(argv)
     parser = argparse.ArgumentParser(
         prog="aeroguard-gui",
-        description="启动 AeroGuard 原生桌面界面。",
+        description=tr("help.gui.description"),
     )
     parser.add_argument("community_path", nargs="?", default="")
     parser.add_argument("--mode", choices=("quick", "full"), default="quick")
     parser.add_argument(
         "--lang", choices=("zh", "en", "zh-CN", "en-US"),
-        help="界面语言（缺省按系统语言；也可用环境变量 AEROGUARD_LANG）",
+        help=tr("help.gui.lang"),
     )
     parser.add_argument("--state-dir")
     return parser.parse_args(argv)
