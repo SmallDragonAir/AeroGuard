@@ -3,4 +3,4 @@
 发布构建时请同步：tools/version_info.txt 与 README/Release 说明。
 """
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
